@@ -18,6 +18,10 @@ public sealed record Settings
     // does it as well. Empty: no key.
     public string RuneResetKey { get; init; } = "Alt+Shift+R";
 
+    // The game's log (logs\Client.txt in the game's folder), read for new maps (RuneChain). Empty:
+    // looked for in the standard install folders and Steam libraries.
+    public string GameLogFile { get; init; } = "";
+
     // The live price at a waystone's or tablet's tooltip, asked on the trade site by itself;
     // off, nothing is asked or drawn at the tooltip. One switch for both kinds (21.10.2026);
     // the exact-price key (ExactKey) asks even while it is off.

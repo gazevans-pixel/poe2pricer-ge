@@ -23,7 +23,7 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
         // fill it while no list is open (the open list's own bar shows the row in question, not
         // a choice). Not in the diagnosis, which must leave no trace (LookContext.Observe).
         if (!context.Observe)
-            Pipeline.Runes.FollowLog(context.Log);
+            Pipeline.Runes.FollowLog(context.Settings.GameLogFile, context.Log);
         if (Pipeline.Remnants.Locate(frame.Image) is not { } list)
         {
             if (!context.Observe)

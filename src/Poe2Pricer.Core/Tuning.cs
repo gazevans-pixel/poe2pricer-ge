@@ -1153,7 +1153,9 @@ public static class Tuning
         public const double SignatureSpread = .26;
         public const int SignatureShift = 2;
         public const double SameRune = .70;
-        public const double SameRuneAcross = .62;
+        // Across the two styles a little above the middle: the chain may hold many runes, and a
+        // row is compared with each of them (31.10.: a chain of 14 marked 6 of 7 rows).
+        public const double SameRuneAcross = .65;
 
         // The picture of a carried rune drawn beside the remnant list.
         public const int ThumbSize = 40;

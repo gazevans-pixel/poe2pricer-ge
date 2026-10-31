@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -33,6 +32,14 @@ public sealed partial class RuneChain : IDisposable
     private readonly List<Carried> carried = [];
     private readonly GameLog log = new();
 
+    // Crowned runes of chosen bars on the last frame looked at: a rune joins the chain only
+    // when two frames in a row show it (one frame can catch a bar half drawn or covered).
+    private List<float[]> lastSeen = [];
+
+    // Where a picture of every rune that joined is kept (with its bar), to check what the chain
+    // holds; emptied with the chain.
+    private static string Pictures => Path.Combine(Settings.Folder, "runes");
+
     public RuneChain(string uiDirectory) => cap = Anchor.Load(uiDirectory, Tune.CapFile);
 
     public int Count
@@ -60,45 +67,81 @@ public sealed partial class RuneChain : IDisposable
         {
             had = carried.Count;
             carried.Clear();
+            lastSeen = [];
         }
+        try
+        {
+            if (Directory.Exists(Pictures))
+                foreach (var file in Directory.GetFiles(Pictures, "*.png"))
+                    File.Delete(file);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
         say?.Invoke($"rune chain cleared ({why}), {had} rune(s) forgotten");
     }
 
-    // A new map in the game's log: a new chain.
-    public void FollowLog(Action<string> say)
+    // A new map in the game's log: a new chain. file: where the user says the log lies
+    // (Settings.GameLogFile); empty: looked for where the game is installed.
+    public void FollowLog(string? file, Action<string> say)
     {
         string? map;
         lock (gate)
-            map = log.NewMap(say);
+            map = log.NewMap(file, say);
         if (map is not null)
             Reset($"new map {map}", say);
     }
 
-    // The crowned runes of the chosen bars on this frame join the chain. How many joined.
+    // The crowned runes of the chosen bars on this frame join the chain, those seen on the frame
+    // before as well. How many joined.
     public int Learn(Mat bgr, Action<string> say)
     {
-        int joined = 0;
+        var seen = new List<(float[] Shape, RuneSlot Slot, RuneSlot[] Bar)>();
         foreach (var bar in Bars(bgr))
         {
             // A slot still empty: the runes are not chosen yet.
             if (bar.Any(s => s.Empty))
                 continue;
             foreach (var slot in bar.Where(s => s.Crowned))
-            {
-                if (Shape(BarInk(bgr, slot.X, slot.Y)) is not { } shape)
-                    continue;
-                lock (gate)
-                {
-                    if (carried.Any(c => Similar(c.Shape, shape) >= Tune.SameRune))
-                        continue;
-                    carried.Add(new(shape, Thumb(bgr, slot.X, slot.Y)));
-                    joined++;
-                }
-            }
+                if (Shape(BarInk(bgr, slot.X, slot.Y)) is { } shape)
+                    seen.Add((shape, slot, bar));
         }
-        if (joined > 0)
-            say($"rune chain: {joined} crowned rune(s) joined, {Count} carried");
-        return joined;
+        var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number)>();
+        int count;
+        lock (gate)
+        {
+            foreach (var (shape, slot, bar) in seen)
+            {
+                if (!lastSeen.Any(l => Similar(l, shape) >= Tune.SameRune))
+                    continue;
+                if (carried.Any(c => Similar(c.Shape, shape) >= Tune.SameRune))
+                    continue;
+                carried.Add(new(shape, Thumb(bgr, slot.X, slot.Y)));
+                joined.Add((slot, bar, carried.Count));
+            }
+            lastSeen = seen.Select(s => s.Shape).ToList();
+            count = carried.Count;
+        }
+        if (joined.Count == 0)
+            return 0;
+        foreach (var (slot, bar, number) in joined)
+            Keep(bgr, slot, bar, number);
+        say($"rune chain: {joined.Count} crowned rune(s) joined, {count} carried (pictures in {Pictures})");
+        return joined.Count;
+    }
+
+    // The rune that joined and its bar, as the frame showed them.
+    private static void Keep(Mat bgr, RuneSlot slot, RuneSlot[] bar, int number)
+    {
+        try
+        {
+            Directory.CreateDirectory(Pictures);
+            var area = new Rect(bar[0].X - 50, slot.Y - 70, bar[^1].X - bar[0].X + 100, 120).Intersect(new Rect(0, 0, bgr.Width, bgr.Height));
+            if (area.Width <= 0 || area.Height <= 0)
+                return;
+            using var part = new Mat(bgr, area);
+            Cv2.ImWrite(Path.Combine(Pictures, $"{number:00}-{DateTime.Now:HHmmss}-slot{Array.IndexOf(bar, slot) + 1}.png"), part);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException) { }
     }
 
     // The rune bars on the frame, each slot from left to right.
@@ -414,24 +457,32 @@ public sealed partial class RuneChain : IDisposable
     {
         private string? path;
         private long position = -1;
-        private long searched = long.MinValue;
+        private long? searched;
         private (string Area, string Seed)? map;
 
         [GeneratedRegex("""Generating level \d+ area "(?<area>[^"]+)" with seed (?<seed>\d+)""")]
         private static partial Regex Generated();
 
+        private bool toldMissing;
+
         // The map entered since the last call, or null.
-        public string? NewMap(Action<string> say)
+        public string? NewMap(string? configured, Action<string> say)
         {
             if (path is null || !File.Exists(path))
             {
-                if (Environment.TickCount64 - searched < (long)Tune.LogSearchEvery.TotalMilliseconds)
+                if (searched is { } last && Environment.TickCount64 - last < (long)Tune.LogSearchEvery.TotalMilliseconds)
                     return null;
                 searched = Environment.TickCount64;
-                path = Find();
+                path = Find(configured);
                 position = -1;
                 if (path is null)
+                {
+                    if (!toldMissing)
+                        say("rune chain: the game's log (logs\\Client.txt) was not found, so a new map does not clear the chain; set GameLogFile in settings.json, or clear it by key");
+                    toldMissing = true;
                     return null;
+                }
+                toldMissing = false;
                 say($"rune chain: game log {path}");
             }
             try
@@ -478,31 +529,48 @@ public sealed partial class RuneChain : IDisposable
             }
         }
 
-        // The log beside the running game's program; null while the game is not running or its
-        // program cannot be asked for its place.
-        private static string? Find()
+        // The log of the game where it is installed: the place the user named, the standalone
+        // client's folder (Grinding Gear Games\Path of Exile 2…) or a Steam library; of several,
+        // the one written last. The game itself is not asked.
+        private static string? Find(string? configured)
         {
-            foreach (var p in Process.GetProcesses())
+            var candidates = new List<string>();
+            if (!string.IsNullOrWhiteSpace(configured))
+                candidates.Add(configured.Trim().Trim('"'));
+            foreach (var root in new[] { Environment.SpecialFolder.ProgramFilesX86, Environment.SpecialFolder.ProgramFiles }.Select(f => Environment.GetFolderPath(f)).Distinct())
             {
                 try
                 {
-                    if (!p.ProcessName.StartsWith("PathOfExile", StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (p.MainModule?.FileName is not { } program || Path.GetDirectoryName(program) is not { } folder)
-                        continue;
-                    var file = Path.Combine(folder, "logs", "Client.txt");
-                    if (File.Exists(file))
-                        return file;
+                    var publisher = Path.Combine(root, "Grinding Gear Games");
+                    if (Directory.Exists(publisher))
+                        candidates.AddRange(Directory.EnumerateDirectories(publisher, "Path of Exile 2*").Select(d => Path.Combine(d, "logs", "Client.txt")));
                 }
-                catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
-                {
-                }
-                finally
-                {
-                    p.Dispose();
-                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             }
-            return null;
+            foreach (var library in SteamLibraries())
+                candidates.Add(Path.Combine(library, "steamapps", "common", "Path of Exile 2", "logs", "Client.txt"));
+            return candidates.Where(f => File.Exists(f)).OrderByDescending(f => File.GetLastWriteTimeUtc(f)).FirstOrDefault();
+        }
+
+        [GeneratedRegex("""
+            "path"\s+"(?<path>[^"]+)"
+            """)]
+        private static partial Regex LibraryPath();
+
+        // Steam's own folder and every library it lists (steamapps\libraryfolders.vdf).
+        private static List<string> SteamLibraries()
+        {
+            var steam = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam");
+            var libraries = new List<string> { steam };
+            try
+            {
+                var list = Path.Combine(steam, "steamapps", "libraryfolders.vdf");
+                if (File.Exists(list))
+                    foreach (Match m in LibraryPath().Matches(File.ReadAllText(list)))
+                        libraries.Add(m.Groups["path"].Value.Replace(@"\\", @"\"));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            return libraries;
         }
     }
 }
