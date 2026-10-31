@@ -1107,20 +1107,23 @@ public static class Tuning
     public static class Runes
     {
         // The bar's right end (the button with the book), the same on every bar; the "i" button
-        // on the left end is missing on remnants not chosen yet. Measured: on the bar .95–1.00,
-        // anywhere else at most .68.
+        // on the left end is missing on remnants not chosen yet. Only the button's inside: the
+        // first template took in a little of the ground beside it, and over snow the bar's end
+        // fell to .73–.80 (31.10., Frigid Bluffs: no rune learned). Measured on six pictures,
+        // snow among them: on the bar .96–1.00, anywhere else at most .76.
         public const string CapFile = "rune-bar-cap.png";
-        public const double MinimumCapScore = .85;
+        public const double MinimumCapScore = .87;
         public const int MostBars = 4;
 
-        // The last slot's centre from the cap's top left corner (measured -59 to -64, 23 to 25),
-        // the slots RuneSlotPitch apart (measured 74–78), found as circles of this radius
-        // (measured 26–28) in a band SlotBand px above and below the last slot's height.
-        public const int CapToSlotX = -62;
-        public const int CapToSlotY = 24;
+        // The last slot's centre from the template's top left corner (measured -61 to -66, 20 to
+        // 22), the slots SlotPitch apart (measured 74–78), found as circles of this radius
+        // (measured 26–28) in a band SlotBand px above and below the last slot's height. Bars
+        // of up to eight slots seen.
+        public const int CapToSlotX = -64;
+        public const int CapToSlotY = 21;
         public const int SlotPitch = 76;
         public const int SlotTolerance = 10;
-        public const int MostSlots = 8;
+        public const int MostSlots = 10;
         public const int SlotBand = 40;
         public const int SlotRowTolerance = 8;
         public const int SlotRadiusMin = 24;
