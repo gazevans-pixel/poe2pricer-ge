@@ -13,6 +13,8 @@ with more words: https://github.com/saxe78/poe2pricer/releases
   shows all 33 runes (shipped in `data/runes`, named; runes seen that the set does not hold
   are kept in `rune-catalog`): gold and purple first and
   larger, blue and white below, the ones this map's chain carries in colour, the rest grey.
+  A rune that just joined the chain is framed white for a few seconds; a rune clearly one of
+  the set joins at the first look, anything less clear on two looks in a row.
   In the remnant list a row whose crowned rune is carried already gets a red frame and ✗ on
   that rune. The chain is cleared when the game's log (logs/Client.txt) shows another area
   (the hideout, the next map), or with `Alt+Shift+R` (settings.json: RuneResetKey,
