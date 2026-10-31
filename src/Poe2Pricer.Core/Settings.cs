@@ -22,7 +22,8 @@ public sealed record Settings
     // looked for in the standard install folders and Steam libraries.
     public string GameLogFile { get; init; } = "";
 
-    // The rune panel at the top of the screen while the game is in front (RuneChain).
+    // The rune panel at the top of the screen while the game is in front, from the first remnant
+    // list opened in an area until it is left (RuneChain).
     public bool ShowRunePanel { get; init; } = true;
 
     // The live price at a waystone's or tablet's tooltip, asked on the trade site by itself;

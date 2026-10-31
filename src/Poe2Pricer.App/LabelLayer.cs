@@ -320,17 +320,15 @@ public sealed class LabelLayer : FrameworkElement
         return pen;
     }
 
-    // Every rune known, PanelColumns to a row: the carried ones in colour with a gold frame,
-    // the others grey and faint.
+    // Every rune known, laid out as RuneChain.Layout says (gold and purple first and larger):
+    // the carried ones in colour with a gold frame, the others grey and faint.
     private static void DrawRunes(DrawingContext dc, Box b, RuneTile[] runes)
     {
-        double gap = Tuning.Runes.TileGap,
-            size = Tuning.Runes.TileShown;
-        int columns = Tuning.Runes.PanelColumns;
         dc.DrawRoundedRectangle(Plate, null, new Rect(b.X, b.Y, b.Width, b.Height), 6, 6);
+        var (cells, _, _) = RuneChain.Layout(runes);
         for (int i = 0; i < runes.Length; i++)
         {
-            var at = new Rect(b.X + gap + i % columns * (size + gap), b.Y + gap + i / columns * (size + gap), size, size);
+            var at = new Rect(b.X + cells[i].X, b.Y + cells[i].Y, cells[i].Width, cells[i].Height);
             var t = runes[i].Thumb;
             BitmapSource picture = BitmapSource.Create(t.Size, t.Size, 96, 96, PixelFormats.Bgr24, null, t.Bgr, t.Size * 3);
             if (runes[i].Carried)

@@ -327,7 +327,7 @@ public static class Program
         void Compose()
         {
             Label? panel = null;
-            if (showRunes && screen.InFront)
+            if (showRunes && pipeline.Runes.Active && screen.InFront)
             {
                 (Box Screen, double Scale)? place = engineScene is { } sc ? (sc.Screen, sc.Scale) : pipeline.Runes.Seen;
                 if (place is { } p)

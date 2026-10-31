@@ -10,8 +10,11 @@ namespace Poe2Pricer.Core;
 // A small picture of a rune for the overlay: Size × Size pixels, BGR, row by row.
 public sealed record RuneThumb(int Size, byte[] Bgr);
 
-// A rune of the panel: its picture, and whether this map's chain carries it.
-public sealed record RuneTile(RuneThumb Thumb, bool Carried);
+// The colour a rune glows in on its bar. The panel shows gold and purple first and larger.
+public enum RuneColour { Gold, Purple, Blue, White }
+
+// A rune of the panel: its picture, its colour, and whether this map's chain carries it.
+public sealed record RuneTile(RuneThumb Thumb, RuneColour Colour, bool Carried);
 
 // One slot of a rune bar: its centre, the crown above it, no rune in it.
 public sealed record RuneSlot(int X, int Y, bool Crowned, bool Empty);
@@ -23,7 +26,9 @@ public sealed record RuneSlot(int X, int Y, bool Crowned, bool Empty);
 // Beside it the catalogue: every rune seen on a bar so far, kept as pictures across runs
 // (UseCatalog), so the panel shows the whole set with the carried ones lit.
 // Learned from the bars above the remnants while no game window is open (RemnantGameWindow);
-// the chain is forgotten when the game's log shows a new map, or by key; the catalogue stays.
+// the chain is forgotten when the game's log shows another area (the hideout, the next map; back
+// in the same map the bars light it again as they come into view), or by key; the catalogue
+// stays.
 // A rune is known by its shape only (no names on these screens): the same rune on two bars,
 // and a bar's rune against the same rune drawn in the remnant list (Tuning.Runes).
 public sealed partial class RuneChain : IDisposable
@@ -31,7 +36,9 @@ public sealed partial class RuneChain : IDisposable
     // Drawn over a list row's crowned tile whose rune the chain carries already.
     public const string Repeat = "✗";
 
-    private sealed record Known(float[] Shape, RuneThumb Thumb);
+    // Strokes: the rune as drawn on a bar, for telling bar runes apart (Strokes). Shape: scaled
+    // to its spread, for comparing with the same rune drawn in the remnant list (Shape).
+    private sealed record Known(float[] Strokes, float[] Shape, RuneThumb Thumb, RuneColour Colour);
 
     private readonly Mat cap;
     private readonly Lock gate = new();
@@ -42,6 +49,7 @@ public sealed partial class RuneChain : IDisposable
     // Runes on chosen and unchosen bars of the last frame looked at: a rune counts only when two
     // frames in a row show it (one frame can catch a bar half drawn or covered).
     private List<float[]> lastSeen = [];
+
 
     // Where the catalogue's pictures lie and where a picture of each rune that joined the chain
     // is kept with its bar (emptied with the chain). null: nothing is read or written (the
@@ -73,26 +81,69 @@ public sealed partial class RuneChain : IDisposable
         get
         {
             lock (gate)
-                return known.Select((k, i) => new RuneTile(k.Thumb, carried.Contains(i))).ToArray();
+                return known
+                    .Select((k, i) => new RuneTile(k.Thumb, k.Colour, carried.Contains(i)))
+                    .OrderBy(t => t.Colour)
+                    .ToArray();
         }
     }
 
     public void Saw(Box screen, double scale) => Seen = (screen, scale);
 
-    // The panel at the top of the screen, centred: every rune known in rows of PanelColumns, the
-    // carried ones lit. screen, scale: as the overlay draws (Scene). null: no rune known yet.
+    // The panel is shown from the first remnant list opened in an area until the area is left:
+    // a map without remnants shows none.
+    public bool Active { get; private set; }
+
+    // A remnant list is open.
+    public void Opened()
+    {
+        if (Active)
+            return;
+        Active = true;
+        Changed?.Invoke();
+    }
+
+    // The panel at the top of the screen, centred: gold and purple runes in the first rows, larger,
+    // blue and white below, the carried ones lit. screen, scale: as the overlay draws (Scene).
+    // null: no rune known yet.
     public static Label? Panel(RuneTile[] tiles, Box screen, double scale)
     {
         if (tiles.Length == 0 || scale <= 0)
             return null;
-        int columns = Math.Min(tiles.Length, Tune.PanelColumns),
-            rows = (tiles.Length + columns - 1) / columns,
-            step = Tune.TileShown + Tune.TileGap,
-            width = columns * step + Tune.TileGap,
-            height = rows * step + Tune.TileGap;
+        var (_, width, height) = Layout(tiles);
         int x = (int)Math.Round((screen.Width / scale - width) / 2);
         return new Label(new Box(x, Tune.PanelTop, width, height), null, null, "ex", Tier.Normal, false, Runes: tiles);
     }
+
+    // Where each tile of the panel stands, from the panel's top left corner: one block for gold
+    // and purple (EmphasisShown px), one for blue and white (TileShown px), each in rows of
+    // PanelColumns, each row centred. The renderer uses the same.
+    public static (Box[] Cells, int Width, int Height) Layout(RuneTile[] tiles)
+    {
+        int gap = Tune.TileGap;
+        var blocks = new[] { tiles.Where(Emphasised).ToArray(), tiles.Where(t => !Emphasised(t)).ToArray() };
+        var sizes = new[] { Tune.EmphasisShown, Tune.TileShown };
+        var rows = new List<(RuneTile[] Tiles, int Size)>();
+        for (int b = 0; b < 2; b++)
+            for (int i = 0; i < blocks[b].Length; i += Tune.PanelColumns)
+                rows.Add((blocks[b].Skip(i).Take(Tune.PanelColumns).ToArray(), sizes[b]));
+        int width = rows.Count == 0 ? 0 : rows.Max(r => r.Tiles.Length * (r.Size + gap)) + gap;
+        var cells = new Dictionary<RuneTile, Box>(ReferenceEqualityComparer.Instance);
+        int y = gap;
+        foreach (var (row, size) in rows)
+        {
+            int x = (width - row.Length * (size + gap) - gap) / 2 + gap;
+            foreach (var tile in row)
+            {
+                cells[tile] = new Box(x, y, size, size);
+                x += size + gap;
+            }
+            y += size + gap;
+        }
+        return (tiles.Select(t => cells[t]).ToArray(), width, y);
+    }
+
+    private static bool Emphasised(RuneTile t) => t.Colour is RuneColour.Gold or RuneColour.Purple;
 
     // The catalogue's folder: its pictures are read now, new runes are written there.
     public void UseCatalog(string folder, Action<string>? say = null)
@@ -107,10 +158,24 @@ public sealed partial class RuneChain : IDisposable
                 if (picture.Empty() || picture.Width != Tune.ThumbSize || picture.Height != Tune.ThumbSize)
                     continue;
                 int c = Tune.ThumbSize / 2;
-                if (Shape(BarInk(picture, c, c)) is not { } shape)
+                if (Shape(BarInk(picture, c, c)) is not { } shape || Strokes(picture, c, c) is not { } strokes)
                     continue;
+                bool twice;
                 lock (gate)
-                    known.Add(new(shape, Thumb(picture, c, c)));
+                {
+                    twice = known.Any(k => Alike(k.Strokes, strokes) >= Tune.SameStrokes);
+                    if (!twice)
+                        known.Add(new(strokes, shape, Thumb(picture, c, c), ColourOf(picture, c, c)));
+                }
+                if (twice)
+                {
+                    // The same rune caught twice (before Strokes told them apart): set aside.
+                    var aside = Path.Combine(folder, "duplicates");
+                    Directory.CreateDirectory(aside);
+                    File.Move(file, Path.Combine(aside, Path.GetFileName(file)), overwrite: true);
+                    say?.Invoke($"rune catalogue: {Path.GetFileName(file)} is a rune known already, moved to {aside}");
+                    continue;
+                }
                 read++;
             }
         }
@@ -124,8 +189,11 @@ public sealed partial class RuneChain : IDisposable
             Changed?.Invoke();
     }
 
-    public void Reset(string why, Action<string>? say = null)
+    // left: the area was left, so the panel goes too (the key keeps it).
+    public void Reset(string why, Action<string>? say = null, bool left = false)
     {
+        if (left)
+            Active = false;
         int had;
         lock (gate)
         {
@@ -153,35 +221,35 @@ public sealed partial class RuneChain : IDisposable
         lock (gate)
             map = log.NewMap(file, say);
         if (map is not null)
-            Reset($"new map {map}", say);
+            Reset($"entered {map}", say, left: true);
     }
 
     // The runes on the bars of this frame: each one seen on the frame before as well enters the
     // catalogue if new there; a crowned one of a chosen bar joins the chain. How many joined.
     public int Learn(Mat bgr, Action<string> say)
     {
-        var seen = new List<(float[] Shape, RuneSlot Slot, RuneSlot[] Bar, bool Joins)>();
+        var seen = new List<(float[] Strokes, float[] Shape, RuneSlot Slot, RuneSlot[] Bar, bool Joins)>();
         foreach (var bar in Bars(bgr))
         {
             // A slot still empty: the runes are not chosen yet, none of them is carried.
             bool chosen = !bar.Any(s => s.Empty);
             foreach (var slot in bar.Where(s => !s.Empty))
-                if (Shape(BarInk(bgr, slot.X, slot.Y)) is { } shape)
-                    seen.Add((shape, slot, bar, chosen && slot.Crowned));
+                if (Shape(BarInk(bgr, slot.X, slot.Y)) is { } shape && Strokes(bgr, slot.X, slot.Y) is { } strokes)
+                    seen.Add((strokes, shape, slot, bar, chosen && slot.Crowned));
         }
         var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number)>();
         var fresh = new List<(RuneThumb Thumb, int Number)>();
         int count;
         lock (gate)
         {
-            foreach (var (shape, slot, bar, joins) in seen)
+            foreach (var (strokes, shape, slot, bar, joins) in seen)
             {
-                if (!lastSeen.Any(l => Similar(l, shape) >= Tune.SameRune))
+                if (!lastSeen.Any(l => Alike(l, strokes) >= Tune.SameStrokes))
                     continue;
-                int index = known.FindIndex(k => Similar(k.Shape, shape) >= Tune.SameRune);
+                int index = known.FindIndex(k => Alike(k.Strokes, strokes) >= Tune.SameStrokes);
                 if (index < 0)
                 {
-                    known.Add(new(shape, Thumb(bgr, slot.X, slot.Y)));
+                    known.Add(new(strokes, shape, Thumb(bgr, slot.X, slot.Y), ColourOf(bgr, slot.X, slot.Y)));
                     index = known.Count - 1;
                     fresh.Add((known[index].Thumb, known.Count));
                 }
@@ -190,7 +258,7 @@ public sealed partial class RuneChain : IDisposable
                 carried.Add(index);
                 joined.Add((slot, bar, carried.Count));
             }
-            lastSeen = seen.Select(s => s.Shape).ToList();
+            lastSeen = seen.Select(s => s.Strokes).ToList();
             count = carried.Count;
         }
         foreach (var (thumb, number) in fresh)
@@ -535,6 +603,110 @@ public sealed partial class RuneChain : IDisposable
         return best;
     }
 
+    // A bar's rune as it is drawn (the bars are drawn at one size, so nothing is scaled): its
+    // brightest strokes inside the slot, as 0 or 1, mean 0, length 1. null: nothing drawn.
+    private static float[]? Strokes(Mat bgr, int x, int y)
+    {
+        int r = Tune.StrokeRadius;
+        using var f = Brightest(bgr, x, y, Tune.ThumbSize / 2);
+        if (f is null)
+            return null;
+        using var blur = new Mat();
+        Cv2.GaussianBlur(f, blur, new Size(0, 0), Tune.StrokeBlur);
+        using var ink = new Mat();
+        Cv2.Subtract(f, blur, ink);
+        int c = Tune.ThumbSize / 2,
+            n = 2 * r;
+        using var square = new Mat(ink, new Rect(c - r, c - r, n, n));
+        using var dense = square.Clone();
+        dense.GetArray(out float[] v);
+        var inside = new bool[n * n];
+        var values = new List<float>();
+        for (int i = 0; i < n * n; i++)
+        {
+            int dy = i / n - r,
+                dx = i % n - r;
+            inside[i] = dx * dx + dy * dy <= (r - 1) * (r - 1);
+            if (inside[i] && v[i] > 0)
+                values.Add(v[i]);
+        }
+        if (values.Count < 10)
+            return null;
+        values.Sort();
+        float cut = values[(int)(values.Count * Tune.StrokeShare)];
+        var bits = new float[n * n];
+        for (int i = 0; i < n * n; i++)
+            bits[i] = inside[i] && v[i] > cut ? 1 : 0;
+        double mean = bits.Average(b => (double)b);
+        double norm = Math.Sqrt(bits.Sum(b => (b - mean) * (b - mean)));
+        if (norm <= 0)
+            return null;
+        return bits.Select(b => (float)((b - mean) / norm)).ToArray();
+    }
+
+    // Best correlation of two strokes pictures shifted by up to StrokeShift px, over the part
+    // they share.
+    private static double Alike(float[] a, float[] b)
+    {
+        int n = 2 * Tune.StrokeRadius,
+            k = Tune.StrokeShift;
+        double best = -1;
+        for (int dy = -k; dy <= k; dy++)
+        for (int dx = -k; dx <= k; dx++)
+        {
+            double ab = 0, aa = 0, bb = 0;
+            for (int y = Math.Max(0, dy); y < n + Math.Min(0, dy); y++)
+            for (int x = Math.Max(0, dx); x < n + Math.Min(0, dx); x++)
+            {
+                float p = a[y * n + x],
+                    q = b[(y - dy) * n + x - dx];
+                ab += p * q;
+                aa += p * p;
+                bb += q * q;
+            }
+            if (aa > 0 && bb > 0)
+                best = Math.Max(best, ab / Math.Sqrt(aa * bb));
+        }
+        return best;
+    }
+
+    // The colour of a rune's glow: the hue of its bright pixels inside the slot; white when they
+    // have little colour. Measured: gold 18, purple 129–134, blue 105–108, white saturation 18.
+    private static RuneColour ColourOf(Mat bgr, int x, int y)
+    {
+        int r = Tune.ThumbSize / 2;
+        var square = new Rect(x - r, y - r, 2 * r, 2 * r).Intersect(new Rect(0, 0, bgr.Width, bgr.Height));
+        using var part = new Mat(bgr, square);
+        using var hsv = new Mat();
+        Cv2.CvtColor(part, hsv, ColorConversionCodes.BGR2HSV);
+        var hues = new List<int>();
+        var saturations = new List<int>();
+        int cx = x - square.X,
+            cy = y - square.Y,
+            inner = Tune.StrokeRadius;
+        for (int py = 0; py < hsv.Rows; py++)
+        for (int px = 0; px < hsv.Cols; px++)
+        {
+            if ((px - cx) * (px - cx) + (py - cy) * (py - cy) > inner * inner)
+                continue;
+            var p = hsv.At<Vec3b>(py, px);
+            if (p.Item2 <= Tune.GlowBright)
+                continue;
+            hues.Add(p.Item0);
+            saturations.Add(p.Item1);
+        }
+        if (hues.Count == 0)
+            return RuneColour.Blue;
+        hues.Sort();
+        saturations.Sort();
+        int hue = hues[hues.Count / 2],
+            saturation = saturations[saturations.Count / 2];
+        return saturation < Tune.WhiteBelow ? RuneColour.White
+            : hue < Tune.GoldBelow ? RuneColour.Gold
+            : hue >= Tune.PurpleFrom ? RuneColour.Purple
+            : RuneColour.Blue;
+    }
+
     // The square round a slot, as it is (a catalogue picture read back gives the same shape).
     private static RuneThumb Thumb(Mat bgr, int x, int y)
     {
@@ -554,8 +726,9 @@ public sealed partial class RuneChain : IDisposable
     public void Dispose() => cap.Dispose();
 
     // The game's log (logs/Client.txt beside the game's program): the game writes a line for
-    // every area it generates, with the area's name and seed. A map with another name or seed
-    // is a new map; a hideout or town in between is not, nor the same map entered again. Read
+    // every area it generates, with the area's name and seed. Another name or seed is another
+    // area: leaving the map for the hideout ends its chain (as the game does), and so does the
+    // next map. Read
     // from where it ended when first found: what came before is no news.
     private sealed partial class GameLog
     {
@@ -614,8 +787,6 @@ public sealed partial class RuneChain : IDisposable
                 {
                     string area = m.Groups["area"].Value,
                         seed = m.Groups["seed"].Value;
-                    if (area.Contains("hideout", StringComparison.OrdinalIgnoreCase) || area.Contains("town", StringComparison.OrdinalIgnoreCase))
-                        continue;
                     if (map is { } now && now.Area == area && now.Seed == seed)
                         continue;
                     map = (area, seed);

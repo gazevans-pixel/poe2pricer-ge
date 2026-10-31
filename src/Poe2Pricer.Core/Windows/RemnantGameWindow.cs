@@ -32,6 +32,8 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
                 Pipeline.Runes.Learn(frame.Image, context.Log);
             return null;
         }
+        if (!context.Observe)
+            Pipeline.Runes.Opened();
         var rows = await Pipeline.Remnants.ReadAsync(frame.Image, list);
         var whole = remembered?.Reopened(rows);
         if (whole is not null && whole.Rows.Count > rows.Length)

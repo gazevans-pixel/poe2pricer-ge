@@ -1165,8 +1165,30 @@ public static class Tuning
         // unshifted .44–.99 on two bars, .41–.78 bar against list; chosen well below.
         public const double QuickReject = .25;
 
-        // The panel of runes at the top of the screen: TileShown px per rune, PanelColumns to a
-        // row, PanelTop px below the screen's top edge, centred.
+        // Telling bar runes apart (the bars are drawn at one size): the brightest StrokeShare of
+        // the strokes (image above its blur) within StrokeRadius px of the slot's centre, as 0/1,
+        // compared shifted by up to StrokeShift px over the part both share. Measured on the
+        // first 23 runes of a live catalogue and on four pictures (31.10.): the same rune
+        // .55–.92, two different runes at most .34 — where the scaled Shape had put two
+        // different purple runes at .70 and the same rune twice at .58 and .61.
+        public const int StrokeRadius = 17;
+        public const double StrokeBlur = 3;
+        public const double StrokeShare = .6;
+        public const int StrokeShift = 4;
+        public const double SameStrokes = .45;
+
+        // A rune's colour (RuneColour): the median hue and saturation of the slot's pixels
+        // brighter than GlowBright. Measured: gold hue 18, purple 129–134, blue 105–108, white
+        // saturation 18 (the others 115 and more).
+        public const int GlowBright = 150;
+        public const int WhiteBelow = 60;
+        public const int GoldBelow = 40;
+        public const int PurpleFrom = 120;
+
+        // The panel of runes at the top of the screen: gold and purple EmphasisShown px, blue
+        // and white TileShown px, PanelColumns to a row, PanelTop px below the screen's top
+        // edge, centred.
+        public const int EmphasisShown = 40;
         public const int TileShown = 30;
         public const int TileGap = 3;
         public const int PanelColumns = 17;
