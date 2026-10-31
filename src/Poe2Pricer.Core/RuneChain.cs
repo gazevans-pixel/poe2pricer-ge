@@ -103,7 +103,7 @@ public sealed partial class RuneChain : IDisposable
         Changed?.Invoke();
     }
 
-    // The panel at the top of the screen, centred: gold and purple runes in the first rows, larger,
+    // The panel at the top of the screen, right of the middle: gold and purple runes in the first rows, larger,
     // blue and white below, the carried ones lit. screen, scale: as the overlay draws (Scene).
     // null: no rune known yet.
     public static Label? Panel(RuneTile[] tiles, Box screen, double scale)
@@ -111,7 +111,7 @@ public sealed partial class RuneChain : IDisposable
         if (tiles.Length == 0 || scale <= 0)
             return null;
         var (_, width, height) = Layout(tiles);
-        int x = (int)Math.Round((screen.Width / scale - width) / 2);
+        int x = Math.Max(0, (int)Math.Round(screen.Width / scale) - Tune.PanelRight - width);
         return new Label(new Box(x, Tune.PanelTop, width, height), null, null, "ex", Tier.Normal, false, Runes: tiles);
     }
 

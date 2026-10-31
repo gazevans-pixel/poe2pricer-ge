@@ -1187,12 +1187,15 @@ public static class Tuning
 
         // The panel of runes at the top of the screen: gold and purple EmphasisShown px, blue
         // and white TileShown px, PanelColumns to a row, PanelTop px below the screen's top
-        // edge, centred.
+        // edge, its right edge PanelRight px left of the screen's right edge: between the
+        // monster health bar in the middle and the map's description at the top right
+        // ("More than 50 monsters remain" starts about 340 px from the right edge). Chosen.
         public const int EmphasisShown = 40;
         public const int TileShown = 30;
         public const int TileGap = 3;
-        public const int PanelColumns = 17;
+        public const int PanelColumns = 10;
         public const int PanelTop = 6;
+        public const int PanelRight = 370;
 
         // The remnant list (keyboard UI): the rune tiles of a row stand on its name's line
         // (short recipes) or ListRise px above it (long ones), the first ListFirstX px right of
