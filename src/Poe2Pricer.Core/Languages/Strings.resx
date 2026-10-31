@@ -855,4 +855,10 @@ What GGG has said about third-party tools, with the sources, and what that means
   <data name="GameLanguageNotRead" xml:space="preserve">
     <value>Game language "{0}" is not read: prices need the English or German game client.</value>
   </data>
+  <data name="RuneChain" xml:space="preserve">
+    <value>Rune chain</value>
+  </data>
+  <data name="TipRuneChain" xml:space="preserve">
+    <value>Grand Expeditions: a rune in a crowned slot of a remnant goes on to every later pack of the chain, and counts once. From the first remnant list you open in a map, a panel at the top of the screen shows every rune seen so far, the ones this map's chain carries lit; in the list, a row whose crowned rune is carried already is marked red. The game's log is read to know when you leave the map. Alt+Shift+R clears the chain. Off: nothing is learned, read or drawn.</value>
+  </data>
 </root>

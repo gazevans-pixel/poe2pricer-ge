@@ -19,20 +19,23 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
 
     public async Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context)
     {
-        // The rune chain: a new map in the game's log clears it; the bars above the remnants
-        // fill it while no list is open (the open list's own bar shows the row in question, not
-        // a choice). Not in the diagnosis, which must leave no trace (LookContext.Observe).
-        if (!context.Observe)
+        // The rune chain, when switched on (Settings.RuneChain): another area in the game's log
+        // clears it; the bars above the remnants fill it while no list is open (the open list's
+        // own bar shows the row in question, not a choice). Not in the diagnosis, which must
+        // leave no trace (LookContext.Observe).
+        bool runes = context.Settings.RuneChain && !context.Observe;
+        if (runes)
+        {
             Pipeline.Runes.FollowLog(context.Settings.GameLogFile, context.Log);
-        if (!context.Observe)
             Pipeline.Runes.Saw(frame.ScreenBounds, frame.Scale);
+        }
         if (Pipeline.Remnants.Locate(frame.Image) is not { } list)
         {
-            if (!context.Observe)
+            if (runes)
                 Pipeline.Runes.Learn(frame.Image, context.Log);
             return null;
         }
-        if (!context.Observe)
+        if (runes)
             Pipeline.Runes.Opened();
         var rows = await Pipeline.Remnants.ReadAsync(frame.Image, list);
         var whole = remembered?.Reopened(rows);
@@ -102,7 +105,7 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
             var book = await prices;
             var settings = context.Settings;
             var labels = Labels.ForRows(Rows, List, book, Labels.FloorInDivine(settings.FloorValue, settings.FloorUnit, book), Tooltips, Whole.Trusted, frame.Language, settings.PriceUnit);
-            var (runeLabels, repeats) = RuneLabels(frame.Image);
+            var (runeLabels, repeats) = settings.RuneChain ? RuneLabels(frame.Image) : (Array.Empty<Label>(), 0);
             labels = [.. labels, .. runeLabels];
             return new Picture(
                 this,

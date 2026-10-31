@@ -22,9 +22,10 @@ public sealed record Settings
     // looked for in the standard install folders and Steam libraries.
     public string GameLogFile { get; init; } = "";
 
-    // The rune panel at the top of the screen while the game is in front, from the first remnant
-    // list opened in an area until it is left (RuneChain).
-    public bool ShowRunePanel { get; init; } = true;
+    // The rune chain of Grand Expeditions (RuneChain): runes learned from the remnants' bars, the
+    // panel at the top of the screen from the first remnant list opened in an area until it is
+    // left, the marks in the remnant list, the game's log read for a new area. Off: none of it.
+    public bool RuneChain { get; init; }
 
     // The live price at a waystone's or tablet's tooltip, asked on the trade site by itself;
     // off, nothing is asked or drawn at the tooltip. One switch for both kinds (21.10.2026);

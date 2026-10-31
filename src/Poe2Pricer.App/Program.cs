@@ -323,7 +323,7 @@ public static class Program
         // in front and a rune is known: with the labels of the window shown, or alone. Composed
         // here on the UI thread, so the control's windows stay as they are.
         Scene? engineScene = null;
-        bool showRunes = settings.ShowRunePanel;
+        bool showRunes = settings.RuneChain;
         void Compose()
         {
             Label? panel = null;
@@ -372,7 +372,7 @@ public static class Program
             keys.Bind(s.DiagnoseKey, () => engine.Diagnose(diagnosticsFolder));
             if (s.ExactKey.Length > 0)
                 keys.Bind(s.ExactKey, engine.Exact);
-            if (s.RuneResetKey.Length > 0)
+            if (s.RuneChain && s.RuneResetKey.Length > 0)
                 keys.Bind(s.RuneResetKey, () => pipeline.Runes.Reset("key", FileLog.Write));
         }
         Bind(settings);
@@ -495,7 +495,7 @@ public static class Program
             engine.Apply(s);
             ApplyCapture(s);
             Bind(s);
-            showRunes = s.ShowRunePanel;
+            showRunes = s.RuneChain;
             Compose();
             Autostarted(s);
             if (s.CheckForUpdates && !updatesChecked)

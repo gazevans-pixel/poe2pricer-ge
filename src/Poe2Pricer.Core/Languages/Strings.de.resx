@@ -858,4 +858,10 @@ Was GGG zu Drittprogrammen gesagt hat, mit Quellen, und was das für dieses Prog
   <data name="GameLanguageNotRead" xml:space="preserve">
     <value>Spielsprache „{0}“ wird nicht gelesen: Preise brauchen den englischen oder deutschen Spielclient.</value>
   </data>
+  <data name="RuneChain" xml:space="preserve">
+    <value>Runenkette</value>
+  </data>
+  <data name="TipRuneChain" xml:space="preserve">
+    <value>Große Expeditionen: Eine Rune in einem gekrönten Feld eines Relikts geht auf jede spätere Gruppe der Kette über und zählt einmal. Ab der ersten Relikt-Liste, die du auf einer Karte öffnest, zeigt eine Leiste oben am Bildschirm alle bisher gesehenen Runen, die von der Kette dieser Karte getragenen hell; in der Liste wird eine Zeile rot markiert, deren gekrönte Rune schon getragen wird. Das Protokoll des Spiels wird gelesen, um zu erkennen, wann du die Karte verlässt. Alt+Umschalt+R leert die Kette. Aus: nichts wird gelernt, gelesen oder gezeichnet.</value>
+  </data>
 </root>

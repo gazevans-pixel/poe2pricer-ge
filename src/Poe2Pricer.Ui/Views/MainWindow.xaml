@@ -417,6 +417,11 @@
                 <CheckBox DataContext="{Binding Switches[2]}" Content="{Binding Label}" IsChecked="{Binding On}" Style="{StaticResource Check}"/>
                 <ContentControl Style="{StaticResource InfoIcon}" ToolTip="{views:Text TipAutoScan}"/>
               </StackPanel>
+              <!-- Beside the Expedition switch it belongs to: the rune chain (off by default). -->
+              <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal" Margin="18,0,0,0">
+                <CheckBox Content="{views:Text RuneChain}" IsChecked="{Binding RuneChain}" Style="{StaticResource Check}"/>
+                <ContentControl Style="{StaticResource InfoIcon}" ToolTip="{views:Text TipRuneChain}"/>
+              </StackPanel>
             </Grid>
           </GroupBox>
 

@@ -54,6 +54,7 @@ public sealed class SettingsViewModel : ObservableObject
     private bool tradeInPerson;
     private bool captureGameWindow;
     private bool liveTradePrice;
+    private bool runeChain;
     private bool checkForUpdates;
     private bool floorInvalid;
     private bool intervalInvalid;
@@ -87,6 +88,7 @@ public sealed class SettingsViewModel : ObservableObject
         tradeInPerson = settings.TradeInPerson;
         captureGameWindow = settings.CaptureGameWindow;
         liveTradePrice = settings.LiveTradePrice;
+        runeChain = settings.RuneChain;
         checkForUpdates = settings.CheckForUpdates;
         interval = Shown(settings.AutoIntervalSeconds);
         glance = Shown(settings.GlanceIntervalSeconds);
@@ -244,6 +246,13 @@ public sealed class SettingsViewModel : ObservableObject
     {
         get => liveTradePrice;
         set => SetProperty(ref liveTradePrice, value);
+    }
+
+    // The rune chain of Grand Expeditions (Settings.RuneChain).
+    public bool RuneChain
+    {
+        get => runeChain;
+        set => SetProperty(ref runeChain, value);
     }
 
     // Trade prices with sellers online in person besides Instant Buyout (Settings.TradeInPerson).
@@ -469,6 +478,7 @@ public sealed class SettingsViewModel : ObservableObject
             TradeInPerson = TradeInPerson,
             CaptureGameWindow = CaptureGameWindow,
             LiveTradePrice = LiveTradePrice,
+            RuneChain = RuneChain,
             CheckForUpdates = CheckForUpdates,
             AutoIntervalSeconds = everyKept,
             GlanceIntervalSeconds = checkKept,
