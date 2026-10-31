@@ -1170,15 +1170,16 @@ public static class Tuning
 
         // Telling bar runes apart (the bars are drawn at one size): the brightest StrokeShare of
         // the strokes (image above its blur) within StrokeRadius px of the slot's centre, as 0/1,
-        // compared shifted by up to StrokeShift px over the part both share. Measured on the
-        // first 23 runes of a live catalogue and on four pictures (31.10.): the same rune
-        // .55–.92, two different runes at most .34 — where the scaled Shape had put two
-        // different purple runes at .70 and the same rune twice at .58 and .61.
-        public const int StrokeRadius = 17;
+        // compared shifted by up to StrokeShift px over the part both share; and the same
+        // colour (RuneColour). A highlighted slot (purple ring) moves the slot's found centre by
+        // a few px, so the radius is small and the shift large. Measured on a live catalogue of
+        // 37 pictures (four runes caught twice) and four pictures, 31.10.: the same rune
+        // .59–.73, two different runes of one colour at most .44.
+        public const int StrokeRadius = 13;
         public const double StrokeBlur = 3;
         public const double StrokeShare = .6;
-        public const int StrokeShift = 4;
-        public const double SameStrokes = .45;
+        public const int StrokeShift = 6;
+        public const double SameStrokes = .52;
 
         // A rune's colour (RuneColour): the median hue and saturation of the slot's pixels
         // brighter than GlowBright. Measured: gold hue 18, purple 129–134, blue 105–108, white

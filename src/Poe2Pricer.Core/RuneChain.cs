@@ -48,7 +48,10 @@ public sealed partial class RuneChain : IDisposable
 
     // Runes on chosen and unchosen bars of the last frame looked at: a rune counts only when two
     // frames in a row show it (one frame can catch a bar half drawn or covered).
-    private List<float[]> lastSeen = [];
+    private List<(float[] Strokes, RuneColour Colour)> lastSeen = [];
+
+    // The number the next catalogue picture is written under (one more than any there).
+    private int nextNumber = 1;
 
 
     // Where the catalogue's pictures lie and where a picture of each rune that joined the chain
@@ -160,12 +163,15 @@ public sealed partial class RuneChain : IDisposable
                 int c = Tune.ThumbSize / 2;
                 if (Shape(BarInk(picture, c, c)) is not { } shape || Strokes(picture, c, c) is not { } strokes)
                     continue;
+                var colour = ColourOf(picture, c, c);
+                if (System.Text.RegularExpressions.Regex.Match(Path.GetFileName(file), @"^rune-(\d+)-") is { Success: true } numbered)
+                    nextNumber = Math.Max(nextNumber, int.Parse(numbered.Groups[1].Value) + 1);
                 bool twice;
                 lock (gate)
                 {
-                    twice = known.Any(k => Alike(k.Strokes, strokes) >= Tune.SameStrokes);
+                    twice = known.Any(k => Same(k.Strokes, k.Colour, strokes, colour));
                     if (!twice)
-                        known.Add(new(strokes, shape, Thumb(picture, c, c), ColourOf(picture, c, c)));
+                        known.Add(new(strokes, shape, Thumb(picture, c, c), colour));
                 }
                 if (twice)
                 {
@@ -228,37 +234,37 @@ public sealed partial class RuneChain : IDisposable
     // catalogue if new there; a crowned one of a chosen bar joins the chain. How many joined.
     public int Learn(Mat bgr, Action<string> say)
     {
-        var seen = new List<(float[] Strokes, float[] Shape, RuneSlot Slot, RuneSlot[] Bar, bool Joins)>();
+        var seen = new List<(float[] Strokes, RuneColour Colour, float[] Shape, RuneSlot Slot, RuneSlot[] Bar, bool Joins)>();
         foreach (var bar in Bars(bgr))
         {
             // A slot still empty: the runes are not chosen yet, none of them is carried.
             bool chosen = !bar.Any(s => s.Empty);
             foreach (var slot in bar.Where(s => !s.Empty))
                 if (Shape(BarInk(bgr, slot.X, slot.Y)) is { } shape && Strokes(bgr, slot.X, slot.Y) is { } strokes)
-                    seen.Add((strokes, shape, slot, bar, chosen && slot.Crowned));
+                    seen.Add((strokes, ColourOf(bgr, slot.X, slot.Y), shape, slot, bar, chosen && slot.Crowned));
         }
         var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number)>();
         var fresh = new List<(RuneThumb Thumb, int Number)>();
         int count;
         lock (gate)
         {
-            foreach (var (strokes, shape, slot, bar, joins) in seen)
+            foreach (var (strokes, colour, shape, slot, bar, joins) in seen)
             {
-                if (!lastSeen.Any(l => Alike(l, strokes) >= Tune.SameStrokes))
+                if (!lastSeen.Any(l => Same(l.Strokes, l.Colour, strokes, colour)))
                     continue;
-                int index = known.FindIndex(k => Alike(k.Strokes, strokes) >= Tune.SameStrokes);
+                int index = known.FindIndex(k => Same(k.Strokes, k.Colour, strokes, colour));
                 if (index < 0)
                 {
-                    known.Add(new(strokes, shape, Thumb(bgr, slot.X, slot.Y), ColourOf(bgr, slot.X, slot.Y)));
+                    known.Add(new(strokes, shape, Thumb(bgr, slot.X, slot.Y), colour));
                     index = known.Count - 1;
-                    fresh.Add((known[index].Thumb, known.Count));
+                    fresh.Add((known[index].Thumb, nextNumber++));
                 }
                 if (!joins || carried.Contains(index))
                     continue;
                 carried.Add(index);
                 joined.Add((slot, bar, carried.Count));
             }
-            lastSeen = seen.Select(s => s.Strokes).ToList();
+            lastSeen = seen.Select(s => (s.Strokes, s.Colour)).ToList();
             count = carried.Count;
         }
         foreach (var (thumb, number) in fresh)
@@ -643,6 +649,10 @@ public sealed partial class RuneChain : IDisposable
             return null;
         return bits.Select(b => (float)((b - mean) / norm)).ToArray();
     }
+
+    // The same rune: the same colour and strokes alike.
+    private static bool Same(float[] a, RuneColour colourA, float[] b, RuneColour colourB) =>
+        colourA == colourB && Alike(a, b) >= Tune.SameStrokes;
 
     // Best correlation of two strokes pictures shifted by up to StrokeShift px, over the part
     // they share.
