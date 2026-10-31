@@ -1,4 +1,49 @@
-# poe2pricer
+# poe2pricer (gazevans-pixel fork)
+
+> **This is a fork of [saxe78/poe2pricer](https://github.com/saxe78/poe2pricer).** Everything
+> below is the original README. The fork adds one feature on top, the **rune chain** for Grand
+> Expeditions, and is kept in step with the original.
+
+## What this fork adds: the rune chain
+
+In a Grand Expedition, a rune in a crowned (gold framed) slot of a Runic Remnant is carried on
+to every later pack in the explosive chain, and each rune only counts once. This fork keeps
+track of that for you:
+
+- A panel at the top of the screen shows all 33 runes, gold and purple first. The ones your
+  chain is carrying on this map are lit, the rest are greyed out. A rune that has just been
+  added gets a white frame for a few seconds.
+- In the Runeshape list, a row whose crowned rune you already carry gets a red frame and a ✗,
+  so you can see which choices add nothing new.
+- The panel appears the first time you open a Runeshape list on a map and goes when you leave
+  the map. Maps without remnants never show it.
+- It learns the runes from the bars above the remnants, and reads the game's own log
+  (`logs\Client.txt`) to know when you change map. `Alt+Shift+R` clears it by hand.
+
+It is **off by default**. Turn it on in the settings window: Automatic scan → **Rune chain**.
+Keyboard and mouse UI only for now.
+
+Like the rest of the program, it only reads the screen and the game's log. It sends no input to
+the game and never touches its memory.
+
+## Building this fork
+
+There are no prebuilt releases here, so build it yourself with the
+[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0):
+
+```
+git clone https://github.com/gazevans-pixel/poe2pricer-ge
+cd poe2pricer-ge
+dotnet publish src/Poe2Pricer.App -c Release -r win-x64 --self-contained true -o C:\poe2pricer
+```
+
+Then run `C:\poe2pricer\poe2pricer.exe`. To update, quit it from the tray, `git pull` and run the
+same `dotnet publish` line again. In the settings, turn off "Check for updates": it looks at the
+original project's releases, which do not have the rune chain.
+
+---
+
+# poe2pricer (original README)
 
 Price overlay for Path of Exile 2. It reads the picture of the game window and writes prices
 from poe.ninja next to what it recognises. It presses no keys, clicks nothing and sends nothing
