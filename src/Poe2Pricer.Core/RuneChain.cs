@@ -288,14 +288,17 @@ public sealed partial class RuneChain : IDisposable
         {
             foreach (var (strokes, colour, shape, slot, bar, joins) in seen)
             {
-                if (!lastSeen.Any(l => Same(l.Strokes, l.Colour, strokes, colour)))
+                // A rune clearly one of those known (the game's set): taken at the first look.
+                // Anything less clear, a rune the set does not hold above all, only when the
+                // look before showed it as well (one frame can catch a bar half drawn or covered).
+                var (index, clear) = Closest(strokes, colour);
+                if (!clear && !lastSeen.Any(l => Same(l.Strokes, l.Colour, strokes, colour)))
                 {
                     // Seen once: carried after the next look, unless carried already.
-                    if (joins && !carried.Any(i => Same(known[i].Strokes, known[i].Colour, strokes, colour)))
+                    if (joins && (index < 0 || !carried.Contains(index)))
                         waiting = true;
                     continue;
                 }
-                int index = known.FindIndex(k => Same(k.Strokes, k.Colour, strokes, colour));
                 if (index < 0)
                 {
                     known.Add(new(strokes, shape, Thumb(bgr, slot.X, slot.Y), colour));
@@ -693,6 +696,38 @@ public sealed partial class RuneChain : IDisposable
         if (norm <= 0)
             return null;
         return bits.Select(b => (float)((b - mean) / norm)).ToArray();
+    }
+
+    // The known rune nearest these strokes in this colour (-1: none alike enough), and whether
+    // it is clearly that one: alike enough and ClearLead ahead of the next nearest. Under gate.
+    private (int Index, bool Clear) Closest(float[] strokes, RuneColour colour)
+    {
+        int best = -1,
+            candidates = 0;
+        double bestScore = -1,
+            second = -1;
+        for (int i = 0; i < known.Count; i++)
+        {
+            if (known[i].Colour != colour)
+                continue;
+            candidates++;
+            double score = Alike(known[i].Strokes, strokes);
+            if (score > bestScore)
+            {
+                second = bestScore;
+                bestScore = score;
+                best = i;
+            }
+            else if (score > second)
+                second = score;
+        }
+        // The only rune of its colour (gold: Opulent, white: Wisdom): the colour tells it, the
+        // strokes need only not be far off.
+        if (candidates == 1 && bestScore >= Tune.LoneFrom)
+            return (best, true);
+        if (bestScore < Tune.SameStrokes)
+            return (-1, false);
+        return (best, bestScore - Math.Max(second, 0) >= Tune.ClearLead);
     }
 
     // The same rune: the same colour and strokes alike.

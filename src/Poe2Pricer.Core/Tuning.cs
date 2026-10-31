@@ -1181,6 +1181,17 @@ public static class Tuning
         public const int StrokeShift = 6;
         public const double SameStrokes = .52;
 
+        // A rune is taken at the first look when it is the known rune of its colour nearest to it
+        // by at least this much (else only when two looks in a row show it). Measured on 21 runes
+        // of five bars against the shipped set (31.10.): the right rune .60–.95, ahead of the next
+        // by .21–.58; a frame that leaves less than this between them is not trusted.
+        public const double ClearLead = .12;
+
+        // The only known rune of its colour (gold, white) is taken from this much: Opulent on a
+        // bar against its own picture .47 (below SameStrokes, the crown's gold in its slot),
+        // against runes of other colours at most .43 — which the colour rules out.
+        public const double LoneFrom = .38;
+
         // A rune's colour (RuneColour): the median hue and saturation of the slot's pixels
         // brighter than GlowBright. Measured: gold hue 18, purple 129–134, blue 105–108, white
         // saturation 18 (the others 115 and more).
