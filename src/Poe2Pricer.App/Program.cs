@@ -331,7 +331,7 @@ public static class Program
             {
                 (Box Screen, double Scale)? place = engineScene is { } sc ? (sc.Screen, sc.Scale) : pipeline.Runes.Seen;
                 if (place is { } p)
-                    panel = RuneChain.Panel(pipeline.Runes.Tiles, p.Screen, p.Scale);
+                    panel = RuneChain.Panel(pipeline.Runes.Tiles, p.Screen, p.Scale, pipeline.Runes.Scan);
             }
             if (engineScene is { } scene)
                 overlay.Show(scene.Screen, panel is null ? scene.Labels : [.. scene.Labels, panel], scene.Rumours, scene.Scale);

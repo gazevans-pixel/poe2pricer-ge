@@ -1201,6 +1201,9 @@ public static class Tuning
         public const int PanelTop = 6;
         public const int PanelRight = 370;
 
+        // A rune that joined the chain is highlighted this long (until the first redraw after).
+        public static readonly TimeSpan FreshFor = TimeSpan.FromSeconds(5);
+
         // The remnant list (keyboard UI): the rune tiles of a row stand on its name's line
         // (short recipes) or ListRise px above it (long ones), the first ListFirstX px right of
         // the list's left edge, ListPitch apart. The crowned tile has a gold frame: the share of

@@ -14,7 +14,13 @@ public sealed record RuneThumb(int Size, byte[] Bgr);
 public enum RuneColour { Gold, Purple, Blue, White }
 
 // A rune of the panel: its picture, its colour, and whether this map's chain carries it.
-public sealed record RuneTile(RuneThumb Thumb, RuneColour Colour, bool Carried);
+// Fresh: joined the chain a moment ago (Tuning.Runes.FreshFor), drawn highlighted.
+public sealed record RuneTile(RuneThumb Thumb, RuneColour Colour, bool Carried, bool Fresh = false);
+
+// What the last look at the bars found, for the panel's scan dot: Waiting — a crowned rune of a
+// chosen bar seen once, not carried yet (the next look confirms it); Beat — flips with every
+// look, so the dot shows the scan is running.
+public sealed record RuneScan(bool Waiting, bool Beat);
 
 // One slot of a rune bar: its centre, the crown above it, no rune in it.
 public sealed record RuneSlot(int X, int Y, bool Crowned, bool Empty);
@@ -52,6 +58,11 @@ public sealed partial class RuneChain : IDisposable
     // frames in a row show it (one frame can catch a bar half drawn or covered).
     private List<(float[] Strokes, RuneColour Colour)> lastSeen = [];
 
+    // When each carried rune joined (Environment.TickCount64), for the highlight.
+    private readonly Dictionary<int, long> joinedAt = [];
+
+    public RuneScan Scan { get; private set; } = new(false, false);
+
     // The number the next catalogue picture is written under (one more than any there).
     private int nextNumber = 1;
 
@@ -87,7 +98,7 @@ public sealed partial class RuneChain : IDisposable
         {
             lock (gate)
                 return known
-                    .Select((k, i) => new RuneTile(k.Thumb, k.Colour, carried.Contains(i)))
+                    .Select((k, i) => new RuneTile(k.Thumb, k.Colour, carried.Contains(i), joinedAt.TryGetValue(i, out long at) && Environment.TickCount64 - at < (long)Tune.FreshFor.TotalMilliseconds))
                     .OrderBy(t => t.Colour)
                     .ToArray();
         }
@@ -111,13 +122,15 @@ public sealed partial class RuneChain : IDisposable
     // The panel at the top of the screen, right of the middle: gold and purple runes in the first rows, larger,
     // blue and white below, the carried ones lit. screen, scale: as the overlay draws (Scene).
     // null: no rune known yet.
-    public static Label? Panel(RuneTile[] tiles, Box screen, double scale)
+    public static Label? Panel(RuneTile[] tiles, Box screen, double scale, RuneScan? scan = null)
     {
         if (tiles.Length == 0 || scale <= 0)
             return null;
         var (_, width, height) = Layout(tiles);
         int x = Math.Max(0, (int)Math.Round(screen.Width / scale) - Tune.PanelRight - width);
-        return new Label(new Box(x, Tune.PanelTop, width, height), null, null, "ex", Tier.Normal, false, Runes: tiles);
+        // The scan dot's state travels in Note: "waiting" or "watching", and the beat.
+        string? note = scan is null ? null : (scan.Waiting ? "waiting" : "watching") + (scan.Beat ? ":1" : ":0");
+        return new Label(new Box(x, Tune.PanelTop, width, height), null, null, "ex", Tier.Normal, false, Note: note, Runes: tiles);
     }
 
     // Where each tile of the panel stands, from the panel's top left corner: one block for gold
@@ -228,6 +241,7 @@ public sealed partial class RuneChain : IDisposable
         {
             had = carried.Count;
             carried.Clear();
+            joinedAt.Clear();
             lastSeen = [];
         }
         try
@@ -269,12 +283,18 @@ public sealed partial class RuneChain : IDisposable
         var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number, string Name)>();
         var fresh = new List<(RuneThumb Thumb, int Number)>();
         int count;
+        bool waiting = false;
         lock (gate)
         {
             foreach (var (strokes, colour, shape, slot, bar, joins) in seen)
             {
                 if (!lastSeen.Any(l => Same(l.Strokes, l.Colour, strokes, colour)))
+                {
+                    // Seen once: carried after the next look, unless carried already.
+                    if (joins && !carried.Any(i => Same(known[i].Strokes, known[i].Colour, strokes, colour)))
+                        waiting = true;
                     continue;
+                }
                 int index = known.FindIndex(k => Same(k.Strokes, k.Colour, strokes, colour));
                 if (index < 0)
                 {
@@ -285,6 +305,7 @@ public sealed partial class RuneChain : IDisposable
                 if (!joins || carried.Contains(index))
                     continue;
                 carried.Add(index);
+                joinedAt[index] = Environment.TickCount64;
                 joined.Add((slot, bar, carried.Count, known[index].Name ?? $"unnamed rune {index + 1}"));
             }
             lastSeen = seen.Select(s => (s.Strokes, s.Colour)).ToList();
@@ -298,8 +319,9 @@ public sealed partial class RuneChain : IDisposable
             say($"rune catalogue: {fresh.Count} new rune(s), {known.Count} known");
         if (joined.Count > 0)
             say($"rune chain: {string.Join(", ", joined.Select(j => j.Name))} joined, {count} carried");
-        if (fresh.Count + joined.Count > 0)
-            Changed?.Invoke();
+        // Every look redraws the panel: the scan dot beats, a highlight ends.
+        Scan = new(waiting, !Scan.Beat);
+        Changed?.Invoke();
         return joined.Count;
     }
 

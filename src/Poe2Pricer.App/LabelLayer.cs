@@ -76,7 +76,7 @@ public sealed class LabelLayer : FrameworkElement
             double cx = b.X + b.Width / 2.0;
             if (l.Runes is { } runes)
             {
-                DrawRunes(dc, b, runes);
+                DrawRunes(dc, b, runes, l.Note);
                 continue;
             }
             if (l.Mark == RuneChain.Repeat)
@@ -311,6 +311,9 @@ public sealed class LabelLayer : FrameworkElement
     // plate, each framed in the crown's gold.
     private static readonly Pen RuneFrame = FrozenPen(Color.FromRgb(230, 180, 60), 2);
     private static readonly Pen RepeatFrame = FrozenPen(Color.FromRgb(230, 40, 40), 3);
+    private static readonly Pen FreshFrame = FrozenPen(Color.FromRgb(255, 255, 255), 3);
+    private static readonly Brush ScanWatching = Frozen(new SolidColorBrush(Color.FromRgb(80, 220, 120)));
+    private static readonly Brush ScanWaiting = Frozen(new SolidColorBrush(Color.FromRgb(255, 190, 40)));
     private static readonly Brush RepeatBadge = Frozen(new SolidColorBrush(Color.FromRgb(200, 30, 30)));
 
     private static Pen FrozenPen(Color colour, double width)
@@ -322,7 +325,7 @@ public sealed class LabelLayer : FrameworkElement
 
     // Every rune known, laid out as RuneChain.Layout says (gold and purple first and larger):
     // the carried ones in colour with a gold frame, the others grey and faint.
-    private static void DrawRunes(DrawingContext dc, Box b, RuneTile[] runes)
+    private static void DrawRunes(DrawingContext dc, Box b, RuneTile[] runes, string? scan)
     {
         dc.DrawRoundedRectangle(Plate, null, new Rect(b.X, b.Y, b.Width, b.Height), 6, 6);
         var (cells, _, _) = RuneChain.Layout(runes);
@@ -335,7 +338,7 @@ public sealed class LabelLayer : FrameworkElement
             {
                 picture.Freeze();
                 dc.DrawImage(picture, at);
-                dc.DrawRoundedRectangle(null, RuneFrame, at, 4, 4);
+                dc.DrawRoundedRectangle(null, runes[i].Fresh ? FreshFrame : RuneFrame, at, 4, 4);
             }
             else
             {
@@ -345,6 +348,17 @@ public sealed class LabelLayer : FrameworkElement
                 dc.DrawImage(grey, at);
                 dc.Pop();
             }
+        }
+        // The scan dot left of the panel: green watching, amber a rune seen once and waiting for
+        // the next look; it dims and brightens with every look (RuneScan.Beat).
+        if (scan is { } state)
+        {
+            var brush = state.StartsWith("waiting", StringComparison.Ordinal) ? ScanWaiting : ScanWatching;
+            var centre = new Point(b.X - 12, b.Y + 12);
+            dc.DrawEllipse(Plate, null, centre, 9, 9);
+            dc.PushOpacity(state.EndsWith(":1", StringComparison.Ordinal) ? 1 : .45);
+            dc.DrawEllipse(brush, null, centre, 6, 6);
+            dc.Pop();
         }
     }
 
