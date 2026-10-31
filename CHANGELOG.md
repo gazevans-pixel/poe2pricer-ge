@@ -3,6 +3,16 @@
 All notable changes to poe2pricer, newest first. The release notes on GitHub say the same
 with more words: https://github.com/saxe78/poe2pricer/releases
 
+## Unreleased (gazevans-pixel fork)
+
+### Added
+- Rune chain for Grand Expeditions. A rune in a crowned slot of a Runic Remnant goes on to
+  every later pack of the explosive chain, and the game counts each rune once. The program
+  learns the crowned runes from the bars above remnants whose runes are chosen and shows
+  them in a row above the remnant list; a row whose crowned rune is carried already gets a
+  red frame and ✗ on that rune. Cleared when the game's log (logs/Client.txt) shows a new
+  map, or with `Alt+Shift+R` (Settings: RuneResetKey). Keyboard UI only so far.
+
 ## 1.4.0 — 2026-10-29
 
 ### Fixed

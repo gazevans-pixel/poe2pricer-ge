@@ -349,6 +349,8 @@ public static class Program
             keys.Bind(s.DiagnoseKey, () => engine.Diagnose(diagnosticsFolder));
             if (s.ExactKey.Length > 0)
                 keys.Bind(s.ExactKey, engine.Exact);
+            if (s.RuneResetKey.Length > 0)
+                keys.Bind(s.RuneResetKey, () => pipeline.Runes.Reset("key", FileLog.Write));
         }
         Bind(settings);
         // "Mit Windows starten": the entry follows the setting — now, where an entry naming

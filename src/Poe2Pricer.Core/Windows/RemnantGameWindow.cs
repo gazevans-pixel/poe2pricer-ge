@@ -19,8 +19,17 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
 
     public async Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context)
     {
+        // The rune chain: a new map in the game's log clears it; the bars above the remnants
+        // fill it while no list is open (the open list's own bar shows the row in question, not
+        // a choice). Not in the diagnosis, which must leave no trace (LookContext.Observe).
+        if (!context.Observe)
+            Pipeline.Runes.FollowLog(context.Log);
         if (Pipeline.Remnants.Locate(frame.Image) is not { } list)
+        {
+            if (!context.Observe)
+                Pipeline.Runes.Learn(frame.Image, context.Log);
             return null;
+        }
         var rows = await Pipeline.Remnants.ReadAsync(frame.Image, list);
         var whole = remembered?.Reopened(rows);
         if (whole is not null && whole.Rows.Count > rows.Length)
@@ -89,12 +98,14 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
             var book = await prices;
             var settings = context.Settings;
             var labels = Labels.ForRows(Rows, List, book, Labels.FloorInDivine(settings.FloorValue, settings.FloorUnit, book), Tooltips, Whole.Trusted, frame.Language, settings.PriceUnit);
+            var (runeLabels, repeats) = RuneLabels(frame.Image);
+            labels = [.. labels, .. runeLabels];
             return new Picture(
                 this,
                 labels,
                 null,
                 Texts.Get("RemnantStatus", Texts.Count("Rows", Rows.Length), Texts.Count("Prices", labels.Count(l => l.Text is not null)), book.League),
-                $"Remnant list, {Rows.Length} rows, {labels.Length} labels, {Tooltips.Length} tooltips",
+                $"Remnant list, {Rows.Length} rows, {labels.Length} labels, {Tooltips.Length} tooltips" + (runeLabels.Length > 0 ? $", rune chain {Kind.Pipeline.Runes.Count}, {repeats} repeated" : ""),
                 new
                 {
                     Window = "remnant",
@@ -107,6 +118,32 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
                     Labels = labels,
                 }
             );
+        }
+
+        // The runes the chain carries, in a row above the list beside the window, and a mark on
+        // each row whose crowned rune is one of them: choosing it carries nothing new. Nothing
+        // while the chain is empty.
+        private (Label[] Labels, int Repeats) RuneLabels(Mat frame)
+        {
+            var chain = Kind.Pipeline.Runes;
+            var thumbs = chain.Thumbs;
+            if (thumbs.Length == 0 || List.Mode != UiMode.KeyboardMouse)
+                return ([], 0);
+            var labels = new System.Collections.Generic.List<Label>();
+            int size = Tuning.Runes.ThumbSize,
+                gap = Tuning.Runes.StripGap;
+            var strip = new Box(List.WindowRight + Tuning.Labels.RowGap, List.List.Y - Tuning.Runes.StripAbove, thumbs.Length * (size + gap) + gap, size + 2 * gap);
+            labels.Add(new Label(strip, null, null, "ex", Tier.Normal, false, Runes: thumbs));
+            int repeats = 0;
+            foreach (var (_, x, y) in RuneChain.CrownedInList(frame, List, Rows))
+            {
+                if (chain.Carries(frame, x, y) != true)
+                    continue;
+                int tile = Tuning.Runes.TileSize;
+                labels.Add(new Label(new Box(x - tile / 2, y - tile / 2, tile, tile), null, RuneChain.Repeat, "ex", Tier.Normal, false));
+                repeats++;
+            }
+            return (labels.ToArray(), repeats);
         }
     }
 }

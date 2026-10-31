@@ -19,6 +19,9 @@ public sealed class Pipeline : IDisposable
     public RumourReader Rumours { get; }
     public StashTabReader Stash { get; }
 
+    // The crowned runes carried along this map's explosive chain (Runic Remnants).
+    public RuneChain Runes { get; }
+
     // Item art from poe.ninja for naming stash slots; fetched by the caller (EnsureAsync).
     public IconStore Icons { get; }
     public StashIdentifier Identifier { get; }
@@ -39,6 +42,7 @@ public sealed class Pipeline : IDisposable
         Remnants = new RemnantReader(uiDirectory, Titles);
         Rumours = new RumourReader(uiDirectory, Titles, rumourShapes);
         Stash = new StashTabReader(uiDirectory);
+        Runes = new RuneChain(uiDirectory);
         Icons = icons ?? new IconStore();
         Identifier = new StashIdentifier(Icons);
     }
@@ -76,6 +80,7 @@ public sealed class Pipeline : IDisposable
         Glyphs.Dispose();
         Remnants.Dispose();
         Rumours.Dispose();
+        Runes.Dispose();
         Icons.Dispose();
     }
 }

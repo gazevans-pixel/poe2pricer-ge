@@ -20,7 +20,10 @@ public sealed record Label(
     bool AlignRight = false,
     bool Light = false,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Note = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Arrow = null
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Arrow = null,
+    // The runes carried along the map's chain, drawn as pictures in a row (RuneChain); the
+    // diagnosis names only their number (RemnantGameWindow).
+    [property: System.Text.Json.Serialization.JsonIgnore] RuneThumb[]? Runes = null
 );
 
 public static class Labels

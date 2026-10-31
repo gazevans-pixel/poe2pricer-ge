@@ -1100,4 +1100,86 @@ public static class Tuning
         // free, but not sooner than this.
         public static readonly TimeSpan TradeRetry = TimeSpan.FromSeconds(3);
     }
+
+    // RuneChain: the rune bars above Runic Remnants and the crowned slot of each row of the
+    // remnant list. px at 1440. Measured on four pictures of 3840x2160 brought to 1440 (five
+    // bars of 3, 4, 4, 6 and 6 slots; one remnant list of six rows), 31.10.2026.
+    public static class Runes
+    {
+        // The bar's right end (the button with the book), the same on every bar; the "i" button
+        // on the left end is missing on remnants not chosen yet. Measured: on the bar .95–1.00,
+        // anywhere else at most .68.
+        public const string CapFile = "rune-bar-cap.png";
+        public const double MinimumCapScore = .85;
+        public const int MostBars = 4;
+
+        // The last slot's centre from the cap's top left corner (measured -59 to -64, 23 to 25),
+        // the slots RuneSlotPitch apart (measured 74–78), found as circles of this radius
+        // (measured 26–28) in a band SlotBand px above and below the last slot's height.
+        public const int CapToSlotX = -62;
+        public const int CapToSlotY = 24;
+        public const int SlotPitch = 76;
+        public const int SlotTolerance = 10;
+        public const int MostSlots = 8;
+        public const int SlotBand = 40;
+        public const int SlotRowTolerance = 8;
+        public const int SlotRadiusMin = 24;
+        public const int SlotRadiusMax = 34;
+
+        // The crown above a slot: the share of gold pixels (hue 8–28, saturation above 110,
+        // value above 150) in a 28×16 area 25–41 px above the slot's centre. Measured: crowned
+        // .14–.22, whatever the rune's own colour (blue, purple, gold) and over an empty slot;
+        // not crowned 0.00.
+        public const int CrownAbove = 41;
+        public const int CrownHeight = 16;
+        public const int CrownWidth = 28;
+        public const double CrownFrom = .08;
+
+        // An empty slot: mean glow (brightest channel above its blur) inside the slot below
+        // EmptyBelow. Measured: empty 1.8–1.9, a rune 20–28.
+        public const int InkRadius = 18;
+        public const double EmptyBelow = 10;
+
+        // The rune's shape: its strokes (bar: glowing on dark, list: dark on parchment) taken
+        // from a square of BarInkRadius / ListInkRadius, centred on their centre of mass, scaled
+        // so their spread is SignatureSpread of the SignatureSize square, compared shifted by up
+        // to SignatureShift px. Measured: the same rune on two bars .78–.98, two different runes
+        // at most .61; a bar's rune against the same rune in the list .72–.86, against another
+        // at most .47.
+        public const int BarInkRadius = 21;
+        public const int ListInkRadius = 18;
+        public const double InkBlur = 6;
+        public const int SignatureSize = 48;
+        public const double SignatureSpread = .26;
+        public const int SignatureShift = 2;
+        public const double SameRune = .70;
+        public const double SameRuneAcross = .62;
+
+        // The picture of a carried rune drawn beside the remnant list.
+        public const int ThumbSize = 40;
+
+        // The remnant list (keyboard UI): the rune tiles of a row stand on its name's line
+        // (short recipes) or ListRise px above it (long ones), the first ListFirstX px right of
+        // the list's left edge, ListPitch apart. The crowned tile has a gold frame: the share of
+        // gold pixels in the 4 px ring of a TileSize square. Measured: crowned .46–.48, any
+        // other tile at most .14.
+        public static readonly int[] ListRises = [0, 50];
+        public const int ListFirstX = 28;
+        public const int ListPitch = 54;
+        public const int ListMostRunes = 7;
+        public const int TileSize = 50;
+        public const int TileFrame = 4;
+        public const int TileSearchX = 3;
+        public const int TileSearchY = 6;
+        public const double CrownedTileFrom = .30;
+
+        // The plate of carried runes stands this far above the list's top, beside the window.
+        public const int StripAbove = 70;
+        public const int StripGap = 4;
+
+        // How often the game is looked for again when its log was not found.
+        public static readonly TimeSpan LogSearchEvery = TimeSpan.FromSeconds(30);
+        // At most this much of the log is read at once (a long session's backlog is skipped).
+        public const int LogReadMost = 1 << 20;
+    }
 }

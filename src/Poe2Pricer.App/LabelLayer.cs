@@ -74,6 +74,16 @@ public sealed class LabelLayer : FrameworkElement
         {
             var b = l.Bounds;
             double cx = b.X + b.Width / 2.0;
+            if (l.Runes is { } runes)
+            {
+                DrawRunes(dc, b, runes);
+                continue;
+            }
+            if (l.Mark == RuneChain.Repeat)
+            {
+                DrawRepeat(dc, b);
+                continue;
+            }
             if (l.Row)
             {
                 DrawRow(dc, l);
@@ -295,6 +305,46 @@ public sealed class LabelLayer : FrameworkElement
                 rowY += rowHeight;
             }
         }
+    }
+
+    // The runes carried along the map's chain (RuneChain): their pictures in a row on a dark
+    // plate, each framed in the crown's gold.
+    private static readonly Pen RuneFrame = FrozenPen(Color.FromRgb(230, 180, 60), 2);
+    private static readonly Pen RepeatFrame = FrozenPen(Color.FromRgb(230, 40, 40), 3);
+    private static readonly Brush RepeatBadge = Frozen(new SolidColorBrush(Color.FromRgb(200, 30, 30)));
+
+    private static Pen FrozenPen(Color colour, double width)
+    {
+        var pen = new Pen(new SolidColorBrush(colour), width);
+        pen.Freeze();
+        return pen;
+    }
+
+    private static void DrawRunes(DrawingContext dc, Box b, RuneThumb[] runes)
+    {
+        double gap = Tuning.Runes.StripGap,
+            size = Tuning.Runes.ThumbSize;
+        dc.DrawRoundedRectangle(Plate, null, new Rect(b.X, b.Y, b.Width, b.Height), 6, 6);
+        for (int i = 0; i < runes.Length; i++)
+        {
+            var at = new Rect(b.X + gap + i * (size + gap), b.Y + gap, size, size);
+            var t = runes[i];
+            var picture = BitmapSource.Create(t.Size, t.Size, 96, 96, PixelFormats.Bgr24, null, t.Bgr, t.Size * 3);
+            picture.Freeze();
+            dc.DrawImage(picture, at);
+            dc.DrawRoundedRectangle(null, RuneFrame, at, 4, 4);
+        }
+    }
+
+    // A crowned rune in the remnant list that the chain carries already: choosing that row
+    // carries nothing new. A red frame round the tile and a red badge on its corner.
+    private static void DrawRepeat(DrawingContext dc, Box b)
+    {
+        dc.DrawRoundedRectangle(null, RepeatFrame, new Rect(b.X, b.Y, b.Width, b.Height), 4, 4);
+        double r = 11;
+        var centre = new Point(b.Right - 2, b.Y + 2);
+        dc.DrawEllipse(RepeatBadge, null, centre, r, r);
+        Text(dc, RuneChain.Repeat, 15, Brushes.White, centre.X, centre.Y);
     }
 
     private static FormattedText Format(string s, double size, Brush brush) =>
