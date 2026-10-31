@@ -488,3 +488,11 @@ the file:** the project `Poe2Pricer.App` removes it from the output folder after
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+## Rune pictures (data/runes)
+
+`data/runes`: 33 pictures of the runes of Grand Expeditions as the game draws them on a Runic
+Remnant's bar, captured from the game at 3840×2160 and brought to 1440, each named as the game
+names the rune; the names were matched against the rune icons on poe2db.tw
+(https://poe2db.tw/us/Runeshape_Combinations). Material of Grinding Gear Games, not covered by
+the MIT licence.

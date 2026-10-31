@@ -38,7 +38,9 @@ public sealed partial class RuneChain : IDisposable
 
     // Strokes: the rune as drawn on a bar, for telling bar runes apart (Strokes). Shape: scaled
     // to its spread, for comparing with the same rune drawn in the remnant list (Shape).
-    private sealed record Known(float[] Strokes, float[] Shape, RuneThumb Thumb, RuneColour Colour);
+    // Name: the game's name of a rune of the set shipped with the program (data/runes); null
+    // for one learned that the set does not hold.
+    private sealed record Known(float[] Strokes, float[] Shape, RuneThumb Thumb, RuneColour Colour, string? Name = null);
 
     private readonly Mat cap;
     private readonly Lock gate = new();
@@ -148,41 +150,28 @@ public sealed partial class RuneChain : IDisposable
 
     private static bool Emphasised(RuneTile t) => t.Colour is RuneColour.Gold or RuneColour.Purple;
 
-    // The catalogue's folder: its pictures are read now, new runes are written there.
-    public void UseCatalog(string folder, Action<string>? say = null)
+    // The catalogue: first the set shipped with the program (data/runes, one picture per rune
+    // named as the game names it: all 33 of patch 0.5, captured from the bars and named against
+    // the game's icons on poe2db.tw), then the user's folder, where runes the set does not hold
+    // are written as they are seen. A picture of the user's folder that is a rune known already
+    // is passed over; one caught twice among the user's own is set aside in "duplicates".
+    public void UseCatalog(string folder, string? shipped = null, Action<string>? say = null)
     {
-        int read = 0;
+        int named = 0,
+            read = 0;
         try
         {
+            if (shipped is not null && Directory.Exists(shipped))
+                foreach (var file in Directory.GetFiles(shipped, "*.png").Order(StringComparer.Ordinal))
+                    if (Read(file, Path.GetFileNameWithoutExtension(file), say) is true)
+                        named++;
             Directory.CreateDirectory(folder);
             foreach (var file in Directory.GetFiles(folder, "*.png").Order(StringComparer.Ordinal))
             {
-                using var picture = Cv2.ImRead(file, ImreadModes.Color);
-                if (picture.Empty() || picture.Width != Tune.ThumbSize || picture.Height != Tune.ThumbSize)
-                    continue;
-                int c = Tune.ThumbSize / 2;
-                if (Shape(BarInk(picture, c, c)) is not { } shape || Strokes(picture, c, c) is not { } strokes)
-                    continue;
-                var colour = ColourOf(picture, c, c);
                 if (System.Text.RegularExpressions.Regex.Match(Path.GetFileName(file), @"^rune-(\d+)-") is { Success: true } numbered)
                     nextNumber = Math.Max(nextNumber, int.Parse(numbered.Groups[1].Value) + 1);
-                bool twice;
-                lock (gate)
-                {
-                    twice = known.Any(k => Same(k.Strokes, k.Colour, strokes, colour));
-                    if (!twice)
-                        known.Add(new(strokes, shape, Thumb(picture, c, c), colour));
-                }
-                if (twice)
-                {
-                    // The same rune caught twice (before Strokes told them apart): set aside.
-                    var aside = Path.Combine(folder, "duplicates");
-                    Directory.CreateDirectory(aside);
-                    File.Move(file, Path.Combine(aside, Path.GetFileName(file)), overwrite: true);
-                    say?.Invoke($"rune catalogue: {Path.GetFileName(file)} is a rune known already, moved to {aside}");
-                    continue;
-                }
-                read++;
+                if (Read(file, null, say) is true)
+                    read++;
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException)
@@ -190,9 +179,43 @@ public sealed partial class RuneChain : IDisposable
             say?.Invoke($"rune catalogue not read: {e.Message}");
         }
         catalog = folder;
-        say?.Invoke($"rune catalogue: {read} rune(s) known ({folder})");
-        if (read > 0)
+        say?.Invoke($"rune catalogue: {named} rune(s) of the game's set, {read} more learned ({folder})");
+        if (named + read > 0)
             Changed?.Invoke();
+    }
+
+    // One picture of the catalogue: true when it was a rune not known yet.
+    private bool? Read(string file, string? name, Action<string>? say)
+    {
+        using var picture = Cv2.ImRead(file, ImreadModes.Color);
+        if (picture.Empty() || picture.Width != Tune.ThumbSize || picture.Height != Tune.ThumbSize)
+            return null;
+        int c = Tune.ThumbSize / 2;
+        if (Shape(BarInk(picture, c, c)) is not { } shape || Strokes(picture, c, c) is not { } strokes)
+            return null;
+        var colour = ColourOf(picture, c, c);
+        Known? twin;
+        lock (gate)
+        {
+            twin = known.FirstOrDefault(k => Same(k.Strokes, k.Colour, strokes, colour));
+            if (twin is null)
+                known.Add(new(strokes, shape, Thumb(picture, c, c), colour, name));
+        }
+        if (twin is null)
+            return true;
+        if (twin.Name is null && name is null)
+        {
+            // The same rune caught twice among the user's own: set aside.
+            var aside = Path.Combine(Path.GetDirectoryName(file)!, "duplicates");
+            try
+            {
+                Directory.CreateDirectory(aside);
+                File.Move(file, Path.Combine(aside, Path.GetFileName(file)), overwrite: true);
+                say?.Invoke($"rune catalogue: {Path.GetFileName(file)} is a rune known already, moved to {aside}");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return false;
     }
 
     // left: the area was left, so the panel goes too (the key keeps it).
@@ -243,7 +266,7 @@ public sealed partial class RuneChain : IDisposable
                 if (Shape(BarInk(bgr, slot.X, slot.Y)) is { } shape && Strokes(bgr, slot.X, slot.Y) is { } strokes)
                     seen.Add((strokes, ColourOf(bgr, slot.X, slot.Y), shape, slot, bar, chosen && slot.Crowned));
         }
-        var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number)>();
+        var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number, string Name)>();
         var fresh = new List<(RuneThumb Thumb, int Number)>();
         int count;
         lock (gate)
@@ -262,19 +285,19 @@ public sealed partial class RuneChain : IDisposable
                 if (!joins || carried.Contains(index))
                     continue;
                 carried.Add(index);
-                joined.Add((slot, bar, carried.Count));
+                joined.Add((slot, bar, carried.Count, known[index].Name ?? $"unnamed rune {index + 1}"));
             }
             lastSeen = seen.Select(s => (s.Strokes, s.Colour)).ToList();
             count = carried.Count;
         }
         foreach (var (thumb, number) in fresh)
             Save(thumb, number);
-        foreach (var (slot, bar, number) in joined)
-            Keep(bgr, slot, bar, number);
+        foreach (var (slot, bar, number, name) in joined)
+            Keep(bgr, slot, bar, number, name);
         if (fresh.Count > 0)
             say($"rune catalogue: {fresh.Count} new rune(s), {known.Count} known");
         if (joined.Count > 0)
-            say($"rune chain: {joined.Count} crowned rune(s) joined, {count} carried");
+            say($"rune chain: {string.Join(", ", joined.Select(j => j.Name))} joined, {count} carried");
         if (fresh.Count + joined.Count > 0)
             Changed?.Invoke();
         return joined.Count;
@@ -295,7 +318,7 @@ public sealed partial class RuneChain : IDisposable
     }
 
     // The rune that joined the chain and its bar, as the frame showed them.
-    private void Keep(Mat bgr, RuneSlot slot, RuneSlot[] bar, int number)
+    private void Keep(Mat bgr, RuneSlot slot, RuneSlot[] bar, int number, string name)
     {
         if (Pictures is not { } folder)
             return;
@@ -306,7 +329,7 @@ public sealed partial class RuneChain : IDisposable
             if (area.Width <= 0 || area.Height <= 0)
                 return;
             using var part = new Mat(bgr, area);
-            Cv2.ImWrite(Path.Combine(folder, $"{number:00}-{DateTime.Now:HHmmss}-slot{Array.IndexOf(bar, slot) + 1}.png"), part);
+            Cv2.ImWrite(Path.Combine(folder, $"{number:00}-{DateTime.Now:HHmmss}-{name}-slot{Array.IndexOf(bar, slot) + 1}.png"), part);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException) { }
     }

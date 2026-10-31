@@ -10,7 +10,8 @@ with more words: https://github.com/saxe78/poe2pricer/releases
   chain", beside the Expedition switch. A rune in a crowned slot of a Runic Remnant goes on to
   every later pack of the explosive chain, and the game counts each rune once. From the first
   remnant list opened in an area until the area is left, a panel at the top of the screen
-  shows every rune seen so far (kept across runs in `rune-catalog`): gold and purple first and
+  shows all 33 runes (shipped in `data/runes`, named; runes seen that the set does not hold
+  are kept in `rune-catalog`): gold and purple first and
   larger, blue and white below, the ones this map's chain carries in colour, the rest grey.
   In the remnant list a row whose crowned rune is carried already gets a red frame and ✗ on
   that rune. The chain is cleared when the game's log (logs/Client.txt) shows another area
