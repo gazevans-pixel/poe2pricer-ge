@@ -2,12 +2,16 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using OpenCvSharp;
+using Poe2Pricer.Core.Market;
 using Tune = Poe2Pricer.Core.Tuning.Runes;
 
 namespace Poe2Pricer.Core;
 
 // A small picture of a rune for the overlay: Size × Size pixels, BGR, row by row.
 public sealed record RuneThumb(int Size, byte[] Bgr);
+
+// A rune of the panel: its picture, and whether this map's chain carries it.
+public sealed record RuneTile(RuneThumb Thumb, bool Carried);
 
 // One slot of a rune bar: its centre, the crown above it, no rune in it.
 public sealed record RuneSlot(int X, int Y, bool Crowned, bool Empty);
@@ -16,8 +20,10 @@ public sealed record RuneSlot(int X, int Y, bool Crowned, bool Empty);
 // Remnant goes on to every later pack of the chain, and the game counts each rune once: a
 // second remnant with the same crowned rune adds nothing. So the chain is the set of crowned
 // runes of the remnants whose runes are chosen (a bar without an empty slot), each once.
+// Beside it the catalogue: every rune seen on a bar so far, kept as pictures across runs
+// (UseCatalog), so the panel shows the whole set with the carried ones lit.
 // Learned from the bars above the remnants while no game window is open (RemnantGameWindow);
-// forgotten when the game's log shows a new map, or by key.
+// the chain is forgotten when the game's log shows a new map, or by key; the catalogue stays.
 // A rune is known by its shape only (no names on these screens): the same rune on two bars,
 // and a bar's rune against the same rune drawn in the remnant list (Tuning.Runes).
 public sealed partial class RuneChain : IDisposable
@@ -25,20 +31,30 @@ public sealed partial class RuneChain : IDisposable
     // Drawn over a list row's crowned tile whose rune the chain carries already.
     public const string Repeat = "✗";
 
-    private sealed record Carried(float[] Shape, RuneThumb Thumb);
+    private sealed record Known(float[] Shape, RuneThumb Thumb);
 
     private readonly Mat cap;
     private readonly Lock gate = new();
-    private readonly List<Carried> carried = [];
+    private readonly List<Known> known = [];
+    private readonly List<int> carried = [];
     private readonly GameLog log = new();
 
-    // Crowned runes of chosen bars on the last frame looked at: a rune joins the chain only
-    // when two frames in a row show it (one frame can catch a bar half drawn or covered).
+    // Runes on chosen and unchosen bars of the last frame looked at: a rune counts only when two
+    // frames in a row show it (one frame can catch a bar half drawn or covered).
     private List<float[]> lastSeen = [];
 
-    // Where a picture of every rune that joined is kept (with its bar), to check what the chain
-    // holds; emptied with the chain.
-    private static string Pictures => Path.Combine(Settings.Folder, "runes");
+    // Where the catalogue's pictures lie and where a picture of each rune that joined the chain
+    // is kept with its bar (emptied with the chain). null: nothing is read or written (the
+    // command line and the tests); only the overlay sets it.
+    private string? catalog;
+    private string? Pictures => catalog is null ? null : Path.Combine(catalog, "chain");
+
+    // Something to draw changed: a rune seen for the first time, a rune joined, the chain cleared.
+    public event Action? Changed;
+
+    // The game's place on the screen and its scale at the last look: where the panel goes while
+    // no window is shown.
+    public (Box Screen, double Scale)? Seen { get; private set; }
 
     public RuneChain(string uiDirectory) => cap = Anchor.Load(uiDirectory, Tune.CapFile);
 
@@ -51,13 +67,61 @@ public sealed partial class RuneChain : IDisposable
         }
     }
 
-    public RuneThumb[] Thumbs
+    // Every rune seen so far, in the order first seen, the carried ones marked.
+    public RuneTile[] Tiles
     {
         get
         {
             lock (gate)
-                return carried.Select(c => c.Thumb).ToArray();
+                return known.Select((k, i) => new RuneTile(k.Thumb, carried.Contains(i))).ToArray();
         }
+    }
+
+    public void Saw(Box screen, double scale) => Seen = (screen, scale);
+
+    // The panel at the top of the screen, centred: every rune known in rows of PanelColumns, the
+    // carried ones lit. screen, scale: as the overlay draws (Scene). null: no rune known yet.
+    public static Label? Panel(RuneTile[] tiles, Box screen, double scale)
+    {
+        if (tiles.Length == 0 || scale <= 0)
+            return null;
+        int columns = Math.Min(tiles.Length, Tune.PanelColumns),
+            rows = (tiles.Length + columns - 1) / columns,
+            step = Tune.TileShown + Tune.TileGap,
+            width = columns * step + Tune.TileGap,
+            height = rows * step + Tune.TileGap;
+        int x = (int)Math.Round((screen.Width / scale - width) / 2);
+        return new Label(new Box(x, Tune.PanelTop, width, height), null, null, "ex", Tier.Normal, false, Runes: tiles);
+    }
+
+    // The catalogue's folder: its pictures are read now, new runes are written there.
+    public void UseCatalog(string folder, Action<string>? say = null)
+    {
+        int read = 0;
+        try
+        {
+            Directory.CreateDirectory(folder);
+            foreach (var file in Directory.GetFiles(folder, "*.png").Order(StringComparer.Ordinal))
+            {
+                using var picture = Cv2.ImRead(file, ImreadModes.Color);
+                if (picture.Empty() || picture.Width != Tune.ThumbSize || picture.Height != Tune.ThumbSize)
+                    continue;
+                int c = Tune.ThumbSize / 2;
+                if (Shape(BarInk(picture, c, c)) is not { } shape)
+                    continue;
+                lock (gate)
+                    known.Add(new(shape, Thumb(picture, c, c)));
+                read++;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException)
+        {
+            say?.Invoke($"rune catalogue not read: {e.Message}");
+        }
+        catalog = folder;
+        say?.Invoke($"rune catalogue: {read} rune(s) known ({folder})");
+        if (read > 0)
+            Changed?.Invoke();
     }
 
     public void Reset(string why, Action<string>? say = null)
@@ -71,13 +135,14 @@ public sealed partial class RuneChain : IDisposable
         }
         try
         {
-            if (Directory.Exists(Pictures))
-                foreach (var file in Directory.GetFiles(Pictures, "*.png"))
+            if (Pictures is { } folder && Directory.Exists(folder))
+                foreach (var file in Directory.GetFiles(folder, "*.png"))
                     File.Delete(file);
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
         say?.Invoke($"rune chain cleared ({why}), {had} rune(s) forgotten");
+        Changed?.Invoke();
     }
 
     // A new map in the game's log: a new chain. file: where the user says the log lies
@@ -91,55 +156,83 @@ public sealed partial class RuneChain : IDisposable
             Reset($"new map {map}", say);
     }
 
-    // The crowned runes of the chosen bars on this frame join the chain, those seen on the frame
-    // before as well. How many joined.
+    // The runes on the bars of this frame: each one seen on the frame before as well enters the
+    // catalogue if new there; a crowned one of a chosen bar joins the chain. How many joined.
     public int Learn(Mat bgr, Action<string> say)
     {
-        var seen = new List<(float[] Shape, RuneSlot Slot, RuneSlot[] Bar)>();
+        var seen = new List<(float[] Shape, RuneSlot Slot, RuneSlot[] Bar, bool Joins)>();
         foreach (var bar in Bars(bgr))
         {
-            // A slot still empty: the runes are not chosen yet.
-            if (bar.Any(s => s.Empty))
-                continue;
-            foreach (var slot in bar.Where(s => s.Crowned))
+            // A slot still empty: the runes are not chosen yet, none of them is carried.
+            bool chosen = !bar.Any(s => s.Empty);
+            foreach (var slot in bar.Where(s => !s.Empty))
                 if (Shape(BarInk(bgr, slot.X, slot.Y)) is { } shape)
-                    seen.Add((shape, slot, bar));
+                    seen.Add((shape, slot, bar, chosen && slot.Crowned));
         }
         var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number)>();
+        var fresh = new List<(RuneThumb Thumb, int Number)>();
         int count;
         lock (gate)
         {
-            foreach (var (shape, slot, bar) in seen)
+            foreach (var (shape, slot, bar, joins) in seen)
             {
                 if (!lastSeen.Any(l => Similar(l, shape) >= Tune.SameRune))
                     continue;
-                if (carried.Any(c => Similar(c.Shape, shape) >= Tune.SameRune))
+                int index = known.FindIndex(k => Similar(k.Shape, shape) >= Tune.SameRune);
+                if (index < 0)
+                {
+                    known.Add(new(shape, Thumb(bgr, slot.X, slot.Y)));
+                    index = known.Count - 1;
+                    fresh.Add((known[index].Thumb, known.Count));
+                }
+                if (!joins || carried.Contains(index))
                     continue;
-                carried.Add(new(shape, Thumb(bgr, slot.X, slot.Y)));
+                carried.Add(index);
                 joined.Add((slot, bar, carried.Count));
             }
             lastSeen = seen.Select(s => s.Shape).ToList();
             count = carried.Count;
         }
-        if (joined.Count == 0)
-            return 0;
+        foreach (var (thumb, number) in fresh)
+            Save(thumb, number);
         foreach (var (slot, bar, number) in joined)
             Keep(bgr, slot, bar, number);
-        say($"rune chain: {joined.Count} crowned rune(s) joined, {count} carried (pictures in {Pictures})");
+        if (fresh.Count > 0)
+            say($"rune catalogue: {fresh.Count} new rune(s), {known.Count} known");
+        if (joined.Count > 0)
+            say($"rune chain: {joined.Count} crowned rune(s) joined, {count} carried");
+        if (fresh.Count + joined.Count > 0)
+            Changed?.Invoke();
         return joined.Count;
     }
 
-    // The rune that joined and its bar, as the frame showed them.
-    private static void Keep(Mat bgr, RuneSlot slot, RuneSlot[] bar, int number)
+    // A rune new to the catalogue, as a picture in its folder.
+    private void Save(RuneThumb thumb, int number)
     {
+        if (catalog is null)
+            return;
         try
         {
-            Directory.CreateDirectory(Pictures);
+            using var picture = new Mat(thumb.Size, thumb.Size, MatType.CV_8UC3);
+            Marshal.Copy(thumb.Bgr, 0, picture.Data, thumb.Bgr.Length);
+            Cv2.ImWrite(Path.Combine(catalog, $"rune-{number:000}-{DateTime.Now:yyyyMMdd-HHmmss}.png"), picture);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException) { }
+    }
+
+    // The rune that joined the chain and its bar, as the frame showed them.
+    private void Keep(Mat bgr, RuneSlot slot, RuneSlot[] bar, int number)
+    {
+        if (Pictures is not { } folder)
+            return;
+        try
+        {
+            Directory.CreateDirectory(folder);
             var area = new Rect(bar[0].X - 50, slot.Y - 70, bar[^1].X - bar[0].X + 100, 120).Intersect(new Rect(0, 0, bgr.Width, bgr.Height));
             if (area.Width <= 0 || area.Height <= 0)
                 return;
             using var part = new Mat(bgr, area);
-            Cv2.ImWrite(Path.Combine(Pictures, $"{number:00}-{DateTime.Now:HHmmss}-slot{Array.IndexOf(bar, slot) + 1}.png"), part);
+            Cv2.ImWrite(Path.Combine(folder, $"{number:00}-{DateTime.Now:HHmmss}-slot{Array.IndexOf(bar, slot) + 1}.png"), part);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException) { }
     }
@@ -272,7 +365,7 @@ public sealed partial class RuneChain : IDisposable
         if (Shape(ListInk(bgr, x, y)) is not { } shape)
             return null;
         lock (gate)
-            return carried.Any(c => Similar(c.Shape, shape) >= Tune.SameRuneAcross);
+            return carried.Any(i => Similar(known[i].Shape, shape) >= Tune.SameRuneAcross);
     }
 
     // Share of gold pixels (the crown, the crowned tile's frame) in a part of the picture.
@@ -419,6 +512,13 @@ public sealed partial class RuneChain : IDisposable
     {
         int n = Tune.SignatureSize,
             k = Tune.SignatureShift;
+        // Unshifted far apart: another rune (the shapes are centred on their mass already); the
+        // shift search is left out — a frame compares dozens of runes with each other.
+        double straight = 0;
+        for (int i = 0; i < a.Length; i++)
+            straight += a[i] * b[i];
+        if (straight < Tune.QuickReject)
+            return straight;
         double best = -1;
         for (int dy = -k; dy <= k; dy++)
         for (int dx = -k; dx <= k; dx++)
@@ -435,13 +535,17 @@ public sealed partial class RuneChain : IDisposable
         return best;
     }
 
+    // The square round a slot, as it is (a catalogue picture read back gives the same shape).
     private static RuneThumb Thumb(Mat bgr, int x, int y)
     {
         int size = Tune.ThumbSize;
         var square = new Rect(x - size / 2, y - size / 2, size, size).Intersect(new Rect(0, 0, bgr.Width, bgr.Height));
         using var part = new Mat(bgr, square);
         using var copy = new Mat();
-        Cv2.Resize(part, copy, new Size(size, size));
+        if (square.Width == size && square.Height == size)
+            part.CopyTo(copy);
+        else
+            Cv2.Resize(part, copy, new Size(size, size));
         var bytes = new byte[size * size * 3];
         Marshal.Copy(copy.Data, bytes, 0, bytes.Length);
         return new(size, bytes);

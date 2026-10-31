@@ -24,6 +24,8 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
         // a choice). Not in the diagnosis, which must leave no trace (LookContext.Observe).
         if (!context.Observe)
             Pipeline.Runes.FollowLog(context.Settings.GameLogFile, context.Log);
+        if (!context.Observe)
+            Pipeline.Runes.Saw(frame.ScreenBounds, frame.Scale);
         if (Pipeline.Remnants.Locate(frame.Image) is not { } list)
         {
             if (!context.Observe)
@@ -120,20 +122,15 @@ public sealed class RemnantGameWindow(Pipeline pipeline) : IGameWindow
             );
         }
 
-        // The runes the chain carries, in a row above the list beside the window, and a mark on
-        // each row whose crowned rune is one of them: choosing it carries nothing new. Nothing
-        // while the chain is empty.
+        // A mark on each row whose crowned rune the chain carries already: choosing it carries
+        // nothing new. Nothing while the chain is empty. (The runes themselves stand in the panel
+        // at the top of the screen, RunePanel.)
         private (Label[] Labels, int Repeats) RuneLabels(Mat frame)
         {
             var chain = Kind.Pipeline.Runes;
-            var thumbs = chain.Thumbs;
-            if (thumbs.Length == 0 || List.Mode != UiMode.KeyboardMouse)
+            if (chain.Count == 0 || List.Mode != UiMode.KeyboardMouse)
                 return ([], 0);
             var labels = new System.Collections.Generic.List<Label>();
-            int size = Tuning.Runes.ThumbSize,
-                gap = Tuning.Runes.StripGap;
-            var strip = new Box(List.WindowRight + Tuning.Labels.RowGap, List.List.Y - Tuning.Runes.StripAbove, thumbs.Length * (size + gap) + gap, size + 2 * gap);
-            labels.Add(new Label(strip, null, null, "ex", Tier.Normal, false, Runes: thumbs));
             int repeats = 0;
             foreach (var (_, x, y) in RuneChain.CrownedInList(frame, List, Rows))
             {

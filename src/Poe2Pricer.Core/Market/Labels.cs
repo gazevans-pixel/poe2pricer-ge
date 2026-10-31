@@ -21,9 +21,9 @@ public sealed record Label(
     bool Light = false,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Note = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Arrow = null,
-    // The runes carried along the map's chain, drawn as pictures in a row (RuneChain); the
-    // diagnosis names only their number (RemnantGameWindow).
-    [property: System.Text.Json.Serialization.JsonIgnore] RuneThumb[]? Runes = null
+    // The rune panel (RuneChain.Panel): every rune known, the carried ones lit; not written
+    // into the diagnosis.
+    [property: System.Text.Json.Serialization.JsonIgnore] RuneTile[]? Runes = null
 );
 
 public static class Labels

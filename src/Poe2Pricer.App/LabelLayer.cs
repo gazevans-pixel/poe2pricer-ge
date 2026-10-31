@@ -320,19 +320,33 @@ public sealed class LabelLayer : FrameworkElement
         return pen;
     }
 
-    private static void DrawRunes(DrawingContext dc, Box b, RuneThumb[] runes)
+    // Every rune known, PanelColumns to a row: the carried ones in colour with a gold frame,
+    // the others grey and faint.
+    private static void DrawRunes(DrawingContext dc, Box b, RuneTile[] runes)
     {
-        double gap = Tuning.Runes.StripGap,
-            size = Tuning.Runes.ThumbSize;
+        double gap = Tuning.Runes.TileGap,
+            size = Tuning.Runes.TileShown;
+        int columns = Tuning.Runes.PanelColumns;
         dc.DrawRoundedRectangle(Plate, null, new Rect(b.X, b.Y, b.Width, b.Height), 6, 6);
         for (int i = 0; i < runes.Length; i++)
         {
-            var at = new Rect(b.X + gap + i * (size + gap), b.Y + gap, size, size);
-            var t = runes[i];
-            var picture = BitmapSource.Create(t.Size, t.Size, 96, 96, PixelFormats.Bgr24, null, t.Bgr, t.Size * 3);
-            picture.Freeze();
-            dc.DrawImage(picture, at);
-            dc.DrawRoundedRectangle(null, RuneFrame, at, 4, 4);
+            var at = new Rect(b.X + gap + i % columns * (size + gap), b.Y + gap + i / columns * (size + gap), size, size);
+            var t = runes[i].Thumb;
+            BitmapSource picture = BitmapSource.Create(t.Size, t.Size, 96, 96, PixelFormats.Bgr24, null, t.Bgr, t.Size * 3);
+            if (runes[i].Carried)
+            {
+                picture.Freeze();
+                dc.DrawImage(picture, at);
+                dc.DrawRoundedRectangle(null, RuneFrame, at, 4, 4);
+            }
+            else
+            {
+                var grey = new FormatConvertedBitmap(picture, PixelFormats.Gray8, null, 0);
+                grey.Freeze();
+                dc.PushOpacity(.4);
+                dc.DrawImage(grey, at);
+                dc.Pop();
+            }
         }
     }
 

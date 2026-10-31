@@ -133,6 +133,8 @@ public static class Program
             }
         });
         using var pipeline = new Pipeline(settings.DataPath, ui, rumourShapes: rumourShapes);
+        // The rune catalogue: every rune seen on a remnant's bar, kept across runs (RuneChain).
+        pipeline.Runes.UseCatalog(Path.Combine(Settings.Folder, "rune-catalog"), FileLog.Write);
         var catalog = pipeline.Recognizer.Catalog.Items.ToDictionary(i => i.Id);
         ImageSource? Orb(string id) =>
             catalog.TryGetValue(id, out var item) ? LabelLayer.LoadImage(Path.Combine(settings.DataPath, item.Image)) : null;
@@ -317,14 +319,34 @@ public static class Program
             e.SetObserved();
         };
         // The overlay control decides on its own thread; the overlay window lives on the UI thread.
+        // The rune panel (RuneChain.Panel) stands at the top of the screen whenever the game is
+        // in front and a rune is known: with the labels of the window shown, or alone. Composed
+        // here on the UI thread, so the control's windows stay as they are.
+        Scene? engineScene = null;
+        bool showRunes = settings.ShowRunePanel;
+        void Compose()
+        {
+            Label? panel = null;
+            if (showRunes && screen.InFront)
+            {
+                (Box Screen, double Scale)? place = engineScene is { } sc ? (sc.Screen, sc.Scale) : pipeline.Runes.Seen;
+                if (place is { } p)
+                    panel = RuneChain.Panel(pipeline.Runes.Tiles, p.Screen, p.Scale);
+            }
+            if (engineScene is { } scene)
+                overlay.Show(scene.Screen, panel is null ? scene.Labels : [.. scene.Labels, panel], scene.Rumours, scene.Scale);
+            else if (panel is not null && pipeline.Runes.Seen is { } seen)
+                overlay.Show(seen.Screen, [panel], null, seen.Scale);
+            else
+                overlay.Clear();
+        }
         engine.Draw += scene =>
             app.Dispatcher.BeginInvoke(() =>
             {
-                if (scene is null)
-                    overlay.Clear();
-                else
-                    overlay.Show(scene.Screen, scene.Labels, scene.Rumours, scene.Scale);
+                engineScene = scene;
+                Compose();
             });
+        pipeline.Runes.Changed += () => app.Dispatcher.BeginInvoke(Compose);
         // Evidence pictures (a detected reroll in the Ritual window) go beside the diagnoses;
         // the engine writes them only with "Extended diagnostics" on (Settings).
         string diagnosticsFolder = Path.Combine(Settings.Folder, "diagnostics");
@@ -342,6 +364,7 @@ public static class Program
         using var keys = new KeyboardHook(app.Dispatcher) { Active = () => screen.InFront && !KeyBox.Listening };
         using var foreground = new ForegroundWatcher();
         foreground.Changed += engine.ForegroundChanged;
+        foreground.Changed += () => app.Dispatcher.BeginInvoke(Compose);
         void Bind(Settings s)
         {
             keys.Clear();
@@ -472,6 +495,8 @@ public static class Program
             engine.Apply(s);
             ApplyCapture(s);
             Bind(s);
+            showRunes = s.ShowRunePanel;
+            Compose();
             Autostarted(s);
             if (s.CheckForUpdates && !updatesChecked)
                 CheckUpdates();

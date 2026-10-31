@@ -1157,8 +1157,20 @@ public static class Tuning
         // row is compared with each of them (31.10.: a chain of 14 marked 6 of 7 rows).
         public const double SameRuneAcross = .65;
 
-        // The picture of a carried rune drawn beside the remnant list.
-        public const int ThumbSize = 40;
+        // A rune's picture (the panel, the catalogue): the square round the slot, as large as
+        // the square its shape is taken from (2 × BarInkRadius) and a little more.
+        public const int ThumbSize = 44;
+
+        // Two shapes this far apart unshifted are not compared shifted. Measured: the same rune
+        // unshifted .44–.99 on two bars, .41–.78 bar against list; chosen well below.
+        public const double QuickReject = .25;
+
+        // The panel of runes at the top of the screen: TileShown px per rune, PanelColumns to a
+        // row, PanelTop px below the screen's top edge, centred.
+        public const int TileShown = 30;
+        public const int TileGap = 3;
+        public const int PanelColumns = 17;
+        public const int PanelTop = 6;
 
         // The remnant list (keyboard UI): the rune tiles of a row stand on its name's line
         // (short recipes) or ListRise px above it (long ones), the first ListFirstX px right of
@@ -1175,9 +1187,6 @@ public static class Tuning
         public const int TileSearchY = 6;
         public const double CrownedTileFrom = .30;
 
-        // The plate of carried runes stands this far above the list's top, beside the window.
-        public const int StripAbove = 70;
-        public const int StripGap = 4;
 
         // How often the game is looked for again when its log was not found.
         public static readonly TimeSpan LogSearchEvery = TimeSpan.FromSeconds(30);

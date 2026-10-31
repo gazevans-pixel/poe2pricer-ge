@@ -7,11 +7,12 @@ with more words: https://github.com/saxe78/poe2pricer/releases
 
 ### Added
 - Rune chain for Grand Expeditions. A rune in a crowned slot of a Runic Remnant goes on to
-  every later pack of the explosive chain, and the game counts each rune once. The program
-  learns the crowned runes from the bars above remnants whose runes are chosen and shows
-  them in a row above the remnant list; a row whose crowned rune is carried already gets a
-  red frame and ✗ on that rune. Cleared when the game's log (logs/Client.txt) shows a new
-  map, or with `Alt+Shift+R` (Settings: RuneResetKey). Keyboard UI only so far.
+  every later pack of the explosive chain, and the game counts each rune once. A panel at the
+  top of the screen shows every rune seen so far (kept across runs in `rune-catalog`), the
+  ones this map's chain carries in colour, the rest grey. In the remnant list a row whose
+  crowned rune is carried already gets a red frame and ✗ on that rune. The chain is cleared
+  when the game's log (logs/Client.txt) shows a new map, or with `Alt+Shift+R`
+  (settings.json: RuneResetKey, GameLogFile, ShowRunePanel). Keyboard UI only so far.
 
 ## 1.4.0 — 2026-10-29
 
