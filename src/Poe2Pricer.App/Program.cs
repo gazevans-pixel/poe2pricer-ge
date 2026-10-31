@@ -133,7 +133,7 @@ public static class Program
             }
         });
         using var pipeline = new Pipeline(settings.DataPath, ui, rumourShapes: rumourShapes);
-        // The rune catalogue: every rune seen on a remnant's bar, kept across runs (RuneChain).
+        // The game's runes (data/runes) and where the chain's pictures go (RuneChain).
         pipeline.Runes.UseCatalog(Path.Combine(Settings.Folder, "rune-catalog"), Path.Combine(AppContext.BaseDirectory, "data", "runes"), FileLog.Write);
         var catalog = pipeline.Recognizer.Catalog.Items.ToDictionary(i => i.Id);
         ImageSource? Orb(string id) =>

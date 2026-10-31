@@ -1168,28 +1168,29 @@ public static class Tuning
         // unshifted .44–.99 on two bars, .41–.78 bar against list; chosen well below.
         public const double QuickReject = .25;
 
-        // Telling bar runes apart (the bars are drawn at one size): the brightest StrokeShare of
-        // the strokes (image above its blur) within StrokeRadius px of the slot's centre, as 0/1,
-        // compared shifted by up to StrokeShift px over the part both share; and the same
-        // colour (RuneColour). A highlighted slot (purple ring) moves the slot's found centre by
-        // a few px, so the radius is small and the shift large. Measured on a live catalogue of
-        // 37 pictures (four runes caught twice) and four pictures, 31.10.: the same rune
-        // .59–.73, two different runes of one colour at most .44.
-        public const int StrokeRadius = 13;
+        // Telling a bar's rune (the bars are drawn at one size): the brightest StrokeShare of the
+        // strokes (image above its blur) within StrokeRadius px of the slot's centre, as 0/1,
+        // compared with each rune of the set in its colour, shifted by up to StrokeShift px over
+        // the part both share. A highlighted slot (purple ring) or a bar half drawn moves the
+        // found centre several px, hence the wide shift. Measured on 37 readings of known runes
+        // (27 from pictures and catalogues, 10 a narrower search had read wrong; 31.10.): every
+        // one nearest its own rune, the 27 at .56 and above and .15 or more ahead of the next,
+        // the 10 at .42 and above and .08 or more ahead.
+        public const int StrokeRadius = 15;
         public const double StrokeBlur = 3;
         public const double StrokeShare = .6;
-        public const int StrokeShift = 6;
+        public const int StrokeShift = 9;
+
+        // Clear (taken at the first look): at least SameStrokes and ClearLead ahead of the next
+        // nearest. Probable (taken when two looks in a row read the same rune): at least
+        // KnownFrom and LooseLead ahead. Anything less is passed over.
         public const double SameStrokes = .52;
-
-        // A rune is taken at the first look when it is the known rune of its colour nearest to it
-        // by at least this much (else only when two looks in a row show it). Measured on 21 runes
-        // of five bars against the shipped set (31.10.): the right rune .60–.95, ahead of the next
-        // by .21–.58; a frame that leaves less than this between them is not trusted.
         public const double ClearLead = .12;
+        public const double KnownFrom = .38;
+        public const double LooseLead = .05;
 
-        // The only known rune of its colour (gold, white) is taken from this much: Opulent on a
-        // bar against its own picture .47 (below SameStrokes, the crown's gold in its slot),
-        // against runes of other colours at most .43 — which the colour rules out.
+        // The only rune of its colour (gold, white) is taken from this much: Opulent on a bar
+        // against its own picture .47, the crown's gold in its slot.
         public const double LoneFrom = .38;
 
         // A rune's colour (RuneColour): the median hue and saturation of the slot's pixels

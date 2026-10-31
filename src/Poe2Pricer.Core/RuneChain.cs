@@ -25,14 +25,12 @@ public sealed record RuneSlot(int X, int Y, bool Crowned, bool Empty);
 // Remnant goes on to every later pack of the chain, and the game counts each rune once: a
 // second remnant with the same crowned rune adds nothing. So the chain is the set of crowned
 // runes of the remnants whose runes are chosen (a bar without an empty slot), each once.
-// Beside it the catalogue: every rune seen on a bar so far, kept as pictures across runs
-// (UseCatalog), so the panel shows the whole set with the carried ones lit.
-// Learned from the bars above the remnants while no game window is open (RemnantGameWindow);
-// the chain is forgotten when the game's log shows another area (the hideout, the next map; back
-// in the same map the bars light it again as they come into view), or by key; the catalogue
-// stays.
-// A rune is known by its shape only (no names on these screens): the same rune on two bars,
-// and a bar's rune against the same rune drawn in the remnant list (Tuning.Runes).
+// The runes known are the game's 33, shipped with the program (data/runes); the panel shows them
+// all, the carried ones lit. Read from the bars above the remnants while no game window is open
+// (RemnantGameWindow); the chain is forgotten when the game's log shows another area (the
+// hideout, the next map; back in the same map the bars light it again as they come into view),
+// or by key. A rune is known by its shape and colour (no names on these screens): a bar's rune
+// against the set, and a bar's rune against the same rune drawn in the remnant list.
 public sealed partial class RuneChain : IDisposable
 {
     // Drawn over a list row's crowned tile whose rune the chain carries already.
@@ -52,18 +50,16 @@ public sealed partial class RuneChain : IDisposable
 
     // Runes on chosen and unchosen bars of the last frame looked at: a rune counts only when two
     // frames in a row show it (one frame can catch a bar half drawn or covered).
-    private List<(float[] Strokes, RuneColour Colour)> lastSeen = [];
+    private HashSet<int> lastSeen = [];
 
     // When each carried rune joined (Environment.TickCount64), for the highlight.
     private readonly Dictionary<int, long> joinedAt = [];
 
-    // The number the next catalogue picture is written under (one more than any there).
-    private int nextNumber = 1;
 
 
-    // Where the catalogue's pictures lie and where a picture of each rune that joined the chain
-    // is kept with its bar (emptied with the chain). null: nothing is read or written (the
-    // command line and the tests); only the overlay sets it.
+    // Where a picture of each rune that joined the chain is kept with its bar (its "chain"
+    // folder, emptied with the chain). null: nothing is written (the command line and the
+    // tests); only the overlay sets it.
     private string? catalog;
     private string? Pictures => catalog is null ? null : Path.Combine(catalog, "chain");
 
@@ -155,72 +151,42 @@ public sealed partial class RuneChain : IDisposable
 
     private static bool Emphasised(RuneTile t) => t.Colour is RuneColour.Gold or RuneColour.Purple;
 
-    // The catalogue: first the set shipped with the program (data/runes, one picture per rune
-    // named as the game names it: all 33 of patch 0.5, captured from the bars and named against
-    // the game's icons on poe2db.tw), then the user's folder, where runes the set does not hold
-    // are written as they are seen. A picture of the user's folder that is a rune known already
-    // is passed over; one caught twice among the user's own is set aside in "duplicates".
+    // The runes: the set shipped with the program (data/runes, one picture per rune named as the
+    // game names it: all 33 of patch 0.5, captured from the bars and named against the game's
+    // icons on poe2db.tw). Only these are known; nothing is learned beside them. folder: where
+    // the pictures of runes that join the chain are kept (its "chain" folder).
     public void UseCatalog(string folder, string? shipped = null, Action<string>? say = null)
     {
-        int named = 0,
-            read = 0;
+        int named = 0;
         try
         {
             if (shipped is not null && Directory.Exists(shipped))
                 foreach (var file in Directory.GetFiles(shipped, "*.png").Order(StringComparer.Ordinal))
-                    if (Read(file, Path.GetFileNameWithoutExtension(file), say) is true)
+                    if (Read(file, Path.GetFileNameWithoutExtension(file)))
                         named++;
-            Directory.CreateDirectory(folder);
-            foreach (var file in Directory.GetFiles(folder, "*.png").Order(StringComparer.Ordinal))
-            {
-                if (System.Text.RegularExpressions.Regex.Match(Path.GetFileName(file), @"^rune-(\d+)-") is { Success: true } numbered)
-                    nextNumber = Math.Max(nextNumber, int.Parse(numbered.Groups[1].Value) + 1);
-                if (Read(file, null, say) is true)
-                    read++;
-            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException)
         {
-            say?.Invoke($"rune catalogue not read: {e.Message}");
+            say?.Invoke($"runes not read: {e.Message}");
         }
         catalog = folder;
-        say?.Invoke($"rune catalogue: {named} rune(s) of the game's set, {read} more learned ({folder})");
-        if (named + read > 0)
+        say?.Invoke($"runes: {named} of the game's set read");
+        if (named > 0)
             Changed?.Invoke();
     }
 
-    // One picture of the catalogue: true when it was a rune not known yet.
-    private bool? Read(string file, string? name, Action<string>? say)
+    // One rune of the set.
+    private bool Read(string file, string name)
     {
         using var picture = Cv2.ImRead(file, ImreadModes.Color);
         if (picture.Empty() || picture.Width != Tune.ThumbSize || picture.Height != Tune.ThumbSize)
-            return null;
+            return false;
         int c = Tune.ThumbSize / 2;
         if (Shape(BarInk(picture, c, c)) is not { } shape || Strokes(picture, c, c) is not { } strokes)
-            return null;
-        var colour = ColourOf(picture, c, c);
-        Known? twin;
+            return false;
         lock (gate)
-        {
-            twin = known.FirstOrDefault(k => Same(k.Strokes, k.Colour, strokes, colour));
-            if (twin is null)
-                known.Add(new(strokes, shape, Thumb(picture, c, c), colour, name));
-        }
-        if (twin is null)
-            return true;
-        if (twin.Name is null && name is null)
-        {
-            // The same rune caught twice among the user's own: set aside.
-            var aside = Path.Combine(Path.GetDirectoryName(file)!, "duplicates");
-            try
-            {
-                Directory.CreateDirectory(aside);
-                File.Move(file, Path.Combine(aside, Path.GetFileName(file)), overwrite: true);
-                say?.Invoke($"rune catalogue: {Path.GetFileName(file)} is a rune known already, moved to {aside}");
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        }
-        return false;
+            known.Add(new(strokes, shape, Thumb(picture, c, c), ColourOf(picture, c, c), name));
+        return true;
     }
 
     // left: the area was left, so the panel goes too (the key keeps it).
@@ -234,7 +200,7 @@ public sealed partial class RuneChain : IDisposable
             had = carried.Count;
             carried.Clear();
             joinedAt.Clear();
-            lastSeen = [];
+            lastSeen.Clear();
         }
         try
         {
@@ -259,72 +225,54 @@ public sealed partial class RuneChain : IDisposable
             Reset($"entered {map}", say, left: true);
     }
 
-    // The runes on the bars of this frame: each one seen on the frame before as well enters the
-    // catalogue if new there; a crowned one of a chosen bar joins the chain. How many joined.
+    // The crowned runes of the chosen bars on this frame join the chain. Each is told as the rune
+    // of the set nearest to it in its colour: clearly that one, at the first look; only probably,
+    // when the look before read the same rune as well. A reading near none of them is passed
+    // over. How many joined.
     public int Learn(Mat bgr, Action<string> say)
     {
-        var seen = new List<(float[] Strokes, RuneColour Colour, float[] Shape, RuneSlot Slot, RuneSlot[] Bar, bool Joins)>();
+        var seen = new List<(float[] Strokes, RuneColour Colour, RuneSlot Slot, RuneSlot[] Bar)>();
         foreach (var bar in Bars(bgr))
         {
             // A slot still empty: the runes are not chosen yet, none of them is carried.
-            bool chosen = !bar.Any(s => s.Empty);
-            foreach (var slot in bar.Where(s => !s.Empty))
-                if (Shape(BarInk(bgr, slot.X, slot.Y)) is { } shape && Strokes(bgr, slot.X, slot.Y) is { } strokes)
-                    seen.Add((strokes, ColourOf(bgr, slot.X, slot.Y), shape, slot, bar, chosen && slot.Crowned));
+            if (bar.Any(s => s.Empty))
+                continue;
+            foreach (var slot in bar.Where(s => s.Crowned))
+                if (Strokes(bgr, slot.X, slot.Y) is { } strokes)
+                    seen.Add((strokes, ColourOf(bgr, slot.X, slot.Y), slot, bar));
         }
         var joined = new List<(RuneSlot Slot, RuneSlot[] Bar, int Number, string Name)>();
-        var fresh = new List<(RuneThumb Thumb, int Number)>();
         int count;
         lock (gate)
         {
-            foreach (var (strokes, colour, shape, slot, bar, joins) in seen)
+            var probable = new HashSet<int>();
+            foreach (var (strokes, colour, slot, bar) in seen)
             {
-                // A rune clearly one of those known (the game's set): taken at the first look.
-                // Anything less clear, a rune the set does not hold above all, only when the
-                // look before showed it as well (one frame can catch a bar half drawn or covered).
                 var (index, clear) = Closest(strokes, colour);
-                if (!clear && !lastSeen.Any(l => Same(l.Strokes, l.Colour, strokes, colour)))
-                    continue;
                 if (index < 0)
+                    continue;
+                if (!clear)
                 {
-                    known.Add(new(strokes, shape, Thumb(bgr, slot.X, slot.Y), colour));
-                    index = known.Count - 1;
-                    fresh.Add((known[index].Thumb, nextNumber++));
+                    probable.Add(index);
+                    if (!lastSeen.Contains(index))
+                        continue;
                 }
-                if (!joins || carried.Contains(index))
+                if (carried.Contains(index))
                     continue;
                 carried.Add(index);
                 joinedAt[index] = Environment.TickCount64;
-                joined.Add((slot, bar, carried.Count, known[index].Name ?? $"unnamed rune {index + 1}"));
+                joined.Add((slot, bar, carried.Count, known[index].Name ?? $"rune {index + 1}"));
             }
-            lastSeen = seen.Select(s => (s.Strokes, s.Colour)).ToList();
+            lastSeen = probable;
             count = carried.Count;
         }
-        foreach (var (thumb, number) in fresh)
-            Save(thumb, number);
         foreach (var (slot, bar, number, name) in joined)
             Keep(bgr, slot, bar, number, name);
-        if (fresh.Count > 0)
-            say($"rune catalogue: {fresh.Count} new rune(s), {known.Count} known");
         if (joined.Count > 0)
             say($"rune chain: {string.Join(", ", joined.Select(j => j.Name))} joined, {count} carried");
         // Every look redraws the panel: a highlight ends.
         Changed?.Invoke();
         return joined.Count;
-    }
-
-    // A rune new to the catalogue, as a picture in its folder.
-    private void Save(RuneThumb thumb, int number)
-    {
-        if (catalog is null)
-            return;
-        try
-        {
-            using var picture = new Mat(thumb.Size, thumb.Size, MatType.CV_8UC3);
-            Marshal.Copy(thumb.Bgr, 0, picture.Data, thumb.Bgr.Length);
-            Cv2.ImWrite(Path.Combine(catalog, $"rune-{number:000}-{DateTime.Now:yyyyMMdd-HHmmss}.png"), picture);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OpenCVException) { }
     }
 
     // The rune that joined the chain and its bar, as the frame showed them.
@@ -683,14 +631,16 @@ public sealed partial class RuneChain : IDisposable
         return bits.Select(b => (float)((b - mean) / norm)).ToArray();
     }
 
-    // The known rune nearest these strokes in this colour (-1: none alike enough), and whether
-    // it is clearly that one: alike enough and ClearLead ahead of the next nearest. Under gate.
+    // The rune of the set nearest these strokes in this colour: Index -1 when it is not near
+    // enough (KnownFrom) or not far enough ahead of the next nearest (LooseLead); Clear when it is
+    // near (SameStrokes) and well ahead (ClearLead). The only rune of its colour (gold: Opulent,
+    // white: Wisdom) is told by the colour: clear from LoneFrom. Under gate.
     private (int Index, bool Clear) Closest(float[] strokes, RuneColour colour)
     {
         int best = -1,
             candidates = 0;
         double bestScore = -1,
-            second = -1;
+            second = 0;
         for (int i = 0; i < known.Count; i++)
         {
             if (known[i].Colour != colour)
@@ -699,25 +649,20 @@ public sealed partial class RuneChain : IDisposable
             double score = Alike(known[i].Strokes, strokes);
             if (score > bestScore)
             {
-                second = bestScore;
+                second = Math.Max(second, bestScore);
                 bestScore = score;
                 best = i;
             }
             else if (score > second)
                 second = score;
         }
-        // The only rune of its colour (gold: Opulent, white: Wisdom): the colour tells it, the
-        // strokes need only not be far off.
-        if (candidates == 1 && bestScore >= Tune.LoneFrom)
-            return (best, true);
-        if (bestScore < Tune.SameStrokes)
+        if (candidates == 1)
+            return bestScore >= Tune.LoneFrom ? (best, true) : (-1, false);
+        double lead = bestScore - second;
+        if (bestScore < Tune.KnownFrom || lead < Tune.LooseLead)
             return (-1, false);
-        return (best, bestScore - Math.Max(second, 0) >= Tune.ClearLead);
+        return (best, bestScore >= Tune.SameStrokes && lead >= Tune.ClearLead);
     }
-
-    // The same rune: the same colour and strokes alike.
-    private static bool Same(float[] a, RuneColour colourA, float[] b, RuneColour colourB) =>
-        colourA == colourB && Alike(a, b) >= Tune.SameStrokes;
 
     // Best correlation of two strokes pictures shifted by up to StrokeShift px, over the part
     // they share.
