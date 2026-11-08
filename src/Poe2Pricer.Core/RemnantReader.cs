@@ -169,6 +169,28 @@ public sealed partial class RemnantReader : IDisposable
         return counted > 0 && sum / counted > Tune.ChangedAbove;
     }
 
+    // As Changed, but over the cells of the signature under one box alone (a row of the list),
+    // less the cells under the ignored boxes (the game's rune tooltip): the mean there above
+    // ChangedAbove. No cell counted: not changed.
+    public static bool Changed(double[] a, double[] b, RemnantWindow window, Box within, IReadOnlyList<Box> ignored)
+    {
+        double cw = window.List.Width / (double)Tune.SignatureWidth,
+            ch = window.List.Height / (double)Tune.SignatureHeight,
+            sum = 0;
+        int counted = 0;
+        for (int y = 0; y < Tune.SignatureHeight; y++)
+        for (int x = 0; x < Tune.SignatureWidth; x++)
+        {
+            var cell = new Box((int)(window.List.X + x * cw), (int)(window.List.Y + y * ch), (int)Math.Ceiling(cw), (int)Math.Ceiling(ch));
+            if (!within.Intersects(cell) || ignored.Any(t => t.Intersects(cell)))
+                continue;
+            int i = y * Tune.SignatureWidth + x;
+            sum += Math.Abs(a[i] - b[i]);
+            counted++;
+        }
+        return counted > 0 && sum / counted > Tune.ChangedAbove;
+    }
+
     // Where two signatures differ, for the log: the rows of the list box (in px from its
     // top) whose signature rows differ by more than ChangedAbove on average, as ranges, and
     // the mean over all. Evidence for what moves in a list that is read again and again

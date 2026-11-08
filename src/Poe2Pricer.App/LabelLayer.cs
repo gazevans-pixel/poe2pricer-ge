@@ -368,37 +368,57 @@ public sealed class LabelLayer : FrameworkElement
     // thin while provisional — and under the tile the mouse is on that rune's name and effect.
     private static void DrawStrip(DrawingContext dc, RuneStrip strip, double width)
     {
-        var title = Format(strip.Title, 14, Faint);
-        double left = strip.TilesLeft(width),
-            right = left + strip.TilesWidth;
-        right = Math.Max(right, left + title.Width);
-        var plate = new Rect(left - RuneStrip.Pad, RuneStrip.Top, right - left + 2 * RuneStrip.Pad, RuneStrip.Pad + RuneStrip.TitleHeight + 2 + RuneStrip.Tile + RuneStrip.Pad);
-        dc.DrawRoundedRectangle(Card, StripEdge, plate, 8, 8);
-        dc.DrawText(title, new Point(left, RuneStrip.Top + RuneStrip.Pad - 2));
-        for (int i = 0; i < strip.Entries.Length; i++)
+        var titles = strip.Rows.Select(r => Format(r.Title, 14, Faint)).ToArray();
+        var check = Format("✓", 15, Check);
+        double left = double.MaxValue, right = double.MinValue;
+        for (int r = 0; r < strip.Rows.Length; r++)
         {
-            var e = strip.Entries[i];
-            var t = strip.TileBox(i, width);
-            var box = new Rect(t.X, t.Y, t.Width, t.Height);
-            dc.DrawRoundedRectangle(StripGround, null, box, 4, 4);
-            if (RuneIcon(e.Rune) is { } icon)
-                dc.DrawImage(icon, new Rect(t.X + 2, t.Y + 2, t.Width - 4, t.Height - 4));
-            var pen = e.Fixed ? FramePens.GetValueOrDefault(e.Class, FramePens["neutral"]) : CaptionPens.GetValueOrDefault(e.Class, CaptionPens["neutral"]);
-            dc.DrawRoundedRectangle(null, pen, box, 4, 4);
+            double l = strip.TilesLeft(r, width);
+            left = Math.Min(left, l);
+            right = Math.Max(right, Math.Max(l + strip.TilesWidth(r), l + titles[r].Width + (strip.Rows[r].Complete ? CheckGap + check.Width : 0)));
         }
-        if (strip.Hover >= 0 && strip.Caption is { } caption)
+        var plate = new Rect(left - RuneStrip.Pad, RuneStrip.Top, right - left + 2 * RuneStrip.Pad, strip.Bottom - RuneStrip.Top);
+        dc.DrawRoundedRectangle(Card, StripEdge, plate, 8, 8);
+        for (int r = 0; r < strip.Rows.Length; r++)
         {
-            var t = strip.TileBox(strip.Hover, width);
+            var row = strip.Rows[r];
+            // A complete expedition (all explosives placed): faint, a green check after the title.
+            if (row.Complete)
+                dc.PushOpacity(SpentOpacity);
+            double rowLeft = strip.TilesLeft(r, width), top = RuneStrip.RowTop(r);
+            dc.DrawText(titles[r], new Point(rowLeft, top - 2));
+            if (row.Complete)
+                dc.DrawText(check, new Point(rowLeft + titles[r].Width + CheckGap, top - 3));
+            for (int i = 0; i < row.Entries.Length; i++)
+            {
+                var e = row.Entries[i];
+                var t = strip.TileBox(r, i, width);
+                var box = new Rect(t.X, t.Y, t.Width, t.Height);
+                dc.DrawRoundedRectangle(StripGround, null, box, 4, 4);
+                if (RuneIcon(e.Rune) is { } icon)
+                    dc.DrawImage(icon, new Rect(t.X + 2, t.Y + 2, t.Width - 4, t.Height - 4));
+                var pen = e.Fixed ? FramePens.GetValueOrDefault(e.Class, FramePens["neutral"]) : CaptionPens.GetValueOrDefault(e.Class, CaptionPens["neutral"]);
+                dc.DrawRoundedRectangle(null, pen, box, 4, 4);
+            }
+            if (row.Complete)
+                dc.Pop();
+        }
+        if (strip.Hover is { } h && strip.Caption is { } caption)
+        {
+            var t = strip.TileBox(h.Row, h.Index, width);
             var text = Format(caption, 17, Ink);
             double pad = 10,
                 w = text.Width + 2 * pad,
                 x = Math.Max(0, Math.Min(width - w, t.X + t.Width / 2.0 - w / 2));
             var rect = new Rect(x, plate.Bottom + 4, w, 34);
-            dc.DrawRoundedRectangle(Card, CaptionPens.GetValueOrDefault(strip.Entries[strip.Hover].Class, CaptionPens["neutral"]), rect, 6, 6);
+            dc.DrawRoundedRectangle(Card, CaptionPens.GetValueOrDefault(strip.Rows[h.Row].Entries[h.Index].Class, CaptionPens["neutral"]), rect, 6, 6);
             dc.DrawText(text, new Point(x + pad, rect.Y + (rect.Height - text.Height) / 2));
         }
     }
 
+    private const double SpentOpacity = .45;
+    private const double CheckGap = 6;
+    private static readonly Brush Check = Frozen(new SolidColorBrush(Color.FromRgb(90, 210, 120)));
     private static readonly Pen StripEdge = FrozenPen(Color.FromArgb(200, 90, 90, 100), 1);
     private static readonly Brush StripGround = Frozen(new SolidColorBrush(Color.FromRgb(34, 34, 40)));
     private static readonly Dictionary<string, ImageSource?> RuneIcons = [];

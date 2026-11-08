@@ -18,6 +18,8 @@ public sealed class Pipeline : IDisposable
     public RemnantReader Remnants { get; }
     public RumourReader Rumours { get; }
     public StashTabReader Stash { get; }
+    // The inventory panel: a waystone or tablet is priced only while it is on screen.
+    public InventoryPanel Inventory { get; }
 
     // The runes of Expedition remnants (data/runes beside data/ui): the crowned tile of a
     // remnant row and its rune.
@@ -43,6 +45,7 @@ public sealed class Pipeline : IDisposable
         Remnants = new RemnantReader(uiDirectory, Titles);
         Rumours = new RumourReader(uiDirectory, Titles, rumourShapes);
         Stash = new StashTabReader(uiDirectory);
+        Inventory = new InventoryPanel(uiDirectory);
         Runes = new Runes.RuneBook(Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(uiDirectory)) ?? uiDirectory, "runes"));
         Icons = icons ?? new IconStore();
         Identifier = new StashIdentifier(Icons);
@@ -86,6 +89,7 @@ public sealed class Pipeline : IDisposable
         Glyphs.Dispose();
         Remnants.Dispose();
         Rumours.Dispose();
+        Inventory.Dispose();
         Runes.Dispose();
         Icons.Dispose();
     }

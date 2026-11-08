@@ -131,8 +131,14 @@ public sealed class GameWindows(IReadOnlyList<IGameWindow> all)
 {
     public IReadOnlyList<IGameWindow> All { get; } = all;
 
-    public static GameWindows Standard(Pipeline pipeline, Market.ITradePrices? tradePrices = null, Runes.RuneChain? chain = null) =>
-        new([new FavoursGameWindow(pipeline), new StashGameWindow(pipeline), new RemnantGameWindow(pipeline, chain ?? new Runes.RuneChain()), new RumourGameWindow(pipeline), new TooltipGameWindow(pipeline, tradePrices)]);
+    // The stash window reads the tooltips in the inventory beside it through the tooltip
+    // window (StashGameWindow), the same instance: what it put aside as no waystone's is put
+    // aside for both.
+    public static GameWindows Standard(Pipeline pipeline, Market.ITradePrices? tradePrices = null, Runes.RuneChain? chain = null)
+    {
+        var tooltips = new TooltipGameWindow(pipeline, tradePrices);
+        return new([new FavoursGameWindow(pipeline), new StashGameWindow(pipeline, tooltips), new RemnantGameWindow(pipeline, chain ?? new Runes.RuneChain()), new RumourGameWindow(pipeline), tooltips]);
+    }
 
     // The first wanted window on the frame.
     public async Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context, Func<IGameWindow, bool> wanted)

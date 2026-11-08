@@ -71,22 +71,59 @@ public sealed class WindowsGameScreen : IGameScreen, IDisposable
 
     // The window gave nothing (window capture is not available on this Windows, see
     // WindowCapture.Unavailable, or it stopped) or a black picture while the screen showed the
-    // game (a window in exclusive fullscreen, a driver): the screen is read for the rest of the
-    // run, and the overlay must keep out of captures again (Program). Told once, off the UI
-    // thread, with the reason. A black screen as well is the game itself (its loading screen,
-    // 22.10.2026: the client restarted in another language fell back for nothing) and no fault
-    // of the capture.
+    // game (a window in exclusive fullscreen, a driver): the screen is read until the game
+    // window changes (the client restarted: Search, CaptureRetried) or the settings are saved
+    // (GameWindowOnly), and the overlay must keep out of captures meanwhile (Program). Told
+    // once, off the UI thread, with the reason. A black screen as well is the game itself
+    // (its loading screen, 22.10.2026: the client restarted in another language fell back for
+    // nothing) and no fault of the capture. A fall-back that held for the run condemned the
+    // capture for a transient: the client restarted at another resolution, its new window
+    // gave nothing for longer than the grace while the screen showed its loading art, and
+    // the screen was read until the next start (07.11.2026 16:15, OFFEN F17). The same window
+    // is tried again every CaptureRetryEvery, quietly (a game started after the program
+    // whose loading screen outlasts the grace is no other window; review 08.11.2026): a
+    // picture that is not black ends the fall-back, anything else changes nothing.
     public bool FellBack => fellBack;
     public event Action<FallBackReason>? CaptureFellBack;
+    // The game window changed after a fall-back: the new window is read, the overlay may
+    // show in captures again (Program).
+    public event Action? CaptureRetried;
 
     private bool FromWindow => gameWindowOnly && !fellBack;
+
+    private FallBackReason fellBackReason;
+    private long retriedAt;
 
     private void FallBack(FallBackReason reason)
     {
         if (fellBack)
             return;
+        fellBackReason = reason;
+        retriedAt = Environment.TickCount64;
         fellBack = true;
         CaptureFellBack?.Invoke(reason);
+    }
+
+    // After a fall-back for a black or stopped window: one quiet try at the window every
+    // CaptureRetryEvery; a picture that is not black ends the fall-back (CaptureRetried).
+    private GameCapture.Frame? Retried(Box? area)
+    {
+        if (!fellBack || fellBackReason == FallBackReason.Unavailable || !gameWindowOnly || gameWindow == 0)
+            return null;
+        long now = Environment.TickCount64;
+        if (now - retriedAt < Tuning.Control.CaptureRetryEvery.TotalMilliseconds)
+            return null;
+        retriedAt = now;
+        var trial = GameCapture.Capture(gameWindow, area, config.PopupSize, config.Language, config.TextSize, gameWindow: true, out bool black);
+        if (trial is not null && !black)
+        {
+            troubleSince = -1;
+            fellBack = false;
+            CaptureRetried?.Invoke();
+            return trial;
+        }
+        trial?.Dispose();
+        return null;
     }
 
     public WindowsGameScreen(GameConfig config)
@@ -98,9 +135,26 @@ public sealed class WindowsGameScreen : IGameScreen, IDisposable
     private void Search()
     {
         var window = GameCapture.FindGame();
-        gameWindow = window;
         GetWindowThreadProcessId(window, out var id);
-        gameProcess = window == 0 ? 0 : (int)id;
+        int process = window == 0 ? 0 : (int)id;
+        bool other = window != 0 && (window != gameWindow || process != gameProcess);
+        gameWindow = window;
+        gameProcess = process;
+        if (other)
+            GameChanged();
+    }
+
+    // Another game window (the client restarted, or started after the program): a fresh
+    // grace for it, and a fall-back is over — the window that fell back is gone.
+    private void GameChanged()
+    {
+        troubleSince = -1;
+        // Unavailable for good on this Windows: a retry would only fall back again and say so
+        // twice (review 08.11.2026).
+        if (!fellBack || WindowCapture.Unavailable is not null)
+            return;
+        fellBack = false;
+        CaptureRetried?.Invoke();
     }
 
     public bool InFront => Front();
@@ -129,6 +183,8 @@ public sealed class WindowsGameScreen : IGameScreen, IDisposable
 
     public GameCapture.Frame? Capture(Box? area = null)
     {
+        if (Retried(area) is { } again)
+            return again;
         var frame = GameCapture.Capture(gameWindow, area, config.PopupSize, config.Language, config.TextSize, FromWindow, out bool black);
         if (!FromWindow || gameWindow == 0)
             return frame;

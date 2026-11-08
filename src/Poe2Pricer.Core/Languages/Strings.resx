@@ -541,6 +541,12 @@ Details: {1}</value>
   <data name="KeyNumLock" xml:space="preserve">
     <value>Num Lock</value>
   </data>
+  <data name="GameVersionDiffers" xml:space="preserve">
+    <value>Game version {0}; this release was tested with {1}. A game update can change the windows the program reads.</value>
+  </data>
+  <data name="TooltipUnidentified" xml:space="preserve">
+    <value>unidentified, no price</value>
+  </data>
   <data name="GameTextSizeNotDefault" xml:space="preserve">
     <value>UI Text Size "{0}" is less tested: if a window shows gaps, press {1} and report it.</value>
   </data>

@@ -3,6 +3,31 @@
 All notable changes to poe2pricer, newest first. The release notes on GitHub say the same
 with more words: https://github.com/saxe78/poe2pricer/releases
 
+## 1.5.1 — 2026-11-08
+
+Built and tested against Path of Exile 2 0.5.5f.
+
+### Fixed
+- Waystones and tablets are priced only while the inventory panel is on screen: loot on
+  the ground gets no price any more, nor does an unidentified item.
+- A waystone or tablet in the inventory beside an open stash tab is priced while the stash
+  prices stand.
+- Rune chain: a map with several expeditions gets a row per expedition; a row closes when
+  the explosives counter says all are placed.
+- Remnant list: crowns are read right beside an inscription tile, behind an item's picture,
+  on the Earth rune and under the game's "Item Filter loaded" message.
+- Ritual with a controller: an omen of a look-alike group under the cursor gets its price
+  instead of "!".
+- Reading the game window: after a client restart or a long loading screen the game window
+  is read again instead of the screen for the rest of the run.
+- Outside the game the empty overlay no longer keeps the auto-hide taskbar down.
+
+### Added
+- The log names the game's version; the status line says so when it is not the one this
+  release was tested with.
+- Extended diagnostics keep a picture of a rumour panel placed at another island within
+  seconds, and of a remnant list with an unreadable row or crown.
+
 ## 1.5.0 — 2026-11-05
 
 Built and tested against Path of Exile 2 0.5.5e.

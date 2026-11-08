@@ -194,7 +194,10 @@ public static class Program
         // remnants, forgotten with the next map (ChainTracker reads the game's Client.txt; until
         // it is found the chain stays off).
         var chain = new RuneChain(tracked: false);
-        using var engine = new OverlayEngine(GameWindows.Standard(pipeline, trade, chain), screen, prices, () => rumourBook, settings, TimeProvider.System, FileLog.Write, chain);
+        // The game's explosives counter, for the chain's expedition boundaries (RuneChain.Complete).
+        using var explosives = new ExplosivesReader(ui);
+        FileLog.Write($"Rune chain: the explosives counter's digits are known for screens {string.Join(", ", explosives.DigitHeights)} px high (the controller block's line and the keyboard button's box)");
+        using var engine = new OverlayEngine(GameWindows.Standard(pipeline, trade, chain), screen, prices, () => rumourBook, settings, TimeProvider.System, FileLog.Write, chain, explosives);
         chain.Changed += engine.ChainChanged;
         using var chainTracker = new ChainTracker(chain, FileLog.Write);
         // A rumour panel read before the lines were drawn has lines without a name, and on a
@@ -204,6 +207,15 @@ public static class Program
         // The player's own rune classes (runes-own.json beside the settings).
         pipeline.Runes.UseOwn(Settings.Folder, FileLog.Write);
         var model = new MainViewModel(settings, [], rumourBook, runes: pipeline.Runes);
+        // The game's version (Client.txt): logged, and a line of the window while its number is
+        // not the one this release was tested with (AppInfo.TestedGameVersion; a hotfix letter
+        // does not count) — a game update can change the windows the program reads. Closable;
+        // closed once, it stays away for this version of the program.
+        chainTracker.GameVersion = version => app.Dispatcher.BeginInvoke(() =>
+        {
+            FileLog.Write($"Game version: {version} (this release was tested with {Poe2Pricer.Core.AppInfo.TestedGameVersion})");
+            model.Warn("gameversion", Poe2Pricer.Core.AppInfo.SameGamePatch(version, Poe2Pricer.Core.AppInfo.TestedGameVersion) ? null : new Poe2Pricer.Core.Told("GameVersionDiffers", version, Poe2Pricer.Core.AppInfo.TestedGameVersion), hint: "gameversion");
+        });
         // The game read from its own window or from the screen (Settings.CaptureGameWindow): the
         // overlay keeps out of screen captures only while the screen is read. A black picture of
         // the window falls back to the screen for the run: a line of the window and the log say so.
@@ -225,6 +237,18 @@ public static class Program
             var told = new Poe2Pricer.Core.Told(reason == Poe2Pricer.Core.FallBackReason.Unavailable ? "CaptureUnavailable" : "CaptureFellBack");
             FileLog.Write(told.English + (reason == Poe2Pricer.Core.FallBackReason.Unavailable ? $" ({Poe2Pricer.Core.WindowCapture.Unavailable})" : ""));
             model.Warn("capture", told, hint: reason == Poe2Pricer.Core.FallBackReason.Unavailable ? "capture unavailable" : "capture black");
+            });
+        };
+        // After a fall-back the game window gives pictures again (the client restarted, or
+        // the same window past its loading screen on a retry): it is read, so the overlay may
+        // show in captures again and the line goes.
+        screen.CaptureRetried += () =>
+        {
+            overlay.ExcludeFromCapture(!screen.GameWindowOnly);
+            app.Dispatcher.BeginInvoke(() =>
+            {
+                FileLog.Write("Game window gives pictures again: reading the game window again");
+                model.Warn("capture", null);
             });
         };
         // "Price" on the Waystones tab: the cheapest waystone the profile describes, in the
@@ -745,19 +769,23 @@ public static class Program
         using var trade = new TradeClient(() => book, Console.WriteLine) { InPerson = () => settings.TradeInPerson };
         // POE2PRICER_CHAIN: the rune chain for the picture (pictures for the guide), rune ids
         // in the order chosen, "+" joins the runes of one link, "~" before a link makes it
-        // provisional ("Opulent,~Time+Toxic"). POE2PRICER_CHAIN_HOVER: the tile the mouse is
-        // on (0-based), with that rune's caption under it.
+        // provisional, "|" ends an expedition (all explosives placed) and begins the next
+        // ("Opulent,~Time+Toxic,|,Bond"). POE2PRICER_CHAIN_HOVER: the tile of the last row the
+        // mouse is on (0-based), with that rune's caption under it.
         var chain = new RuneChain();
-        var carried = new List<(Rune Rune, bool Fixed)>();
         foreach (var (link, i) in (Environment.GetEnvironmentVariable("POE2PRICER_CHAIN") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select((l, i) => (l, i)))
         {
+            if (link == "|")
+            {
+                chain.Complete();
+                continue;
+            }
             bool fixedLink = !link.StartsWith('~');
             var runes = link.TrimStart('~').Split('+').Select(id => pipeline.Runes[id] ?? throw new ArgumentException($"unknown rune {id}")).ToArray();
             if (fixedLink)
                 chain.Confirm($"guide-{i}", runes);
             else
                 chain.Guess($"guide-{i}", runes);
-            carried.AddRange(runes.Select(r => (r, fixedLink)));
         }
         var windows = GameWindows.Standard(pipeline, trade, chain);
         IOpenWindow? open = null;
@@ -807,12 +835,12 @@ public static class Program
         // Drawn onto the picture as it is: at the game's part of it, at the picture's scale.
         var layer = new LabelLayer { Labels = labels, Divine = divine, Exalted = exalted, Chaos = chaos, Rumours = rumours, PixelScale = shot.Scale, Origin = new System.Windows.Point(shot.ScreenBounds.X, shot.ScreenBounds.Y) };
         // The rune chain's strip as the overlay draws it (OverlayEngine.Standing).
-        if (carried.Count > 0)
+        if (RuneStrip.Of(chain.Rows, n => Texts.Get("OverlayRuneChain", n)) is { } made)
         {
-            var entries = carried.Select(x => new StripEntry(x.Rune.Id, RuneBook.KeyOf(x.Rune.Class), x.Fixed)).ToArray();
-            var strip = new RuneStrip(Texts.Get("OverlayRuneChain", entries.Length), entries);
-            if (Environment.GetEnvironmentVariable("POE2PRICER_CHAIN_HOVER") is { Length: > 0 } hovered && int.Parse(hovered) is var hover && hover >= 0 && hover < carried.Count)
-                strip = strip with { Hover = hover, Caption = $"{carried[hover].Rune.Name(gameLanguage)}  ·  {carried[hover].Rune.Effect(gameLanguage)}" };
+            var (strip, runes) = made;
+            int last = runes.Length - 1;
+            if (Environment.GetEnvironmentVariable("POE2PRICER_CHAIN_HOVER") is { Length: > 0 } hovered && int.Parse(hovered) is var hover && hover >= 0 && hover < runes[last].Length)
+                strip = strip with { Hover = (last, hover), Caption = $"{runes[last][hover].Name(gameLanguage)}  ·  {runes[last][hover].Effect(gameLanguage)}" };
             layer.Strip = strip;
         }
         var visual = new DrawingVisual();

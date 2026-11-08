@@ -242,8 +242,11 @@ public static class Tuning
         // Caret template 40×22 px, its tip TipAbove px above the item's bottom edge.
         public const int TipAbove = 14;
 
-        // Measured: .67–1.00 with the cursor in the grid, at most .54 otherwise.
-        public const double Threshold = .60;
+        // Measured over 60 controller diagnoses (03.10.–07.11.2026, 1080/1440/2160) with the
+        // mask below: .61–.77 with the cursor in the grid, at most .47 without (the "ACCEPT"
+        // button's gold bar, a gold frame without a caret). The weakest true one: a coloured,
+        // gold-framed group omen under the cursor at 2160 (07.11., OFFEN F18).
+        public const double Threshold = .55;
 
         // Search area beyond the grid (left/right, below) and how far the caret may sit from an
         // item's bottom centre. Chosen.
@@ -252,9 +255,14 @@ public static class Tuning
         public const int MatchVertical = 8;
         public const int MatchHorizontal = 10;
 
-        // Caret pixels: red ≥ 200 and green ≥ 185 (near white with a pale yellow rim).
+        // Caret pixels: red ≥ 200, green ≥ 185 and blue ≥ 120 (near white with a pale yellow
+        // rim). Without the blue floor the gold of a coloured item's medallion and frame went
+        // into the mask too (1435 pixels against 768 at the grey omen beside it) and the caret
+        // scored .58 under the old threshold of .60 (07.11.2026); with it .61, and the false
+        // hits fell from .56 to .47.
         public const int MinimumRed = 200;
         public const int MinimumGreen = 185;
+        public const int MinimumBlue = 120;
     }
 
     // RarityCorners: the ornament at two corners of a unique item in the Favours grid.
@@ -691,6 +699,73 @@ public static class Tuning
         public const double RuneTipFill = .55;
     }
 
+    // The game's explosives counter (Runes.ExplosivesReader), in reference pixels; measured on
+    // 17 pictures of 07.11.2026 (2560×1440 and 3840×2160, keyboard and controller, map and
+    // logbook, placing / all placed / detonated / away from the site).
+    public static class Explosives
+    {
+        // The controller block's icon: within RightBand of the right edge, between IconTop and
+        // IconBottom (found at y 572 under one objective line; the block moves with the lines
+        // above it). Scores: .96–1.00 with the block, ≤ .64 without.
+        public const int RightBand = 520;
+        public const int IconTop = 120;
+        public const int IconBottom = 1000;
+        public const double IconFrom = .80;
+        // The counter line under the heading ("Explosives Placed: 2/5"), read with the game's
+        // own digits (CounterDigits, a set per window height in data/ui/counter, CounterFolder)
+        // in the picture at the game's size: from LineTop to LineBottom below the icon's top,
+        // from LineReach left of the right edge to the icon (the digits are 14–16 px high at
+        // 1440, at the line's right end). The world behind the line is blacked out below
+        // CounterBright (brightest channel; the text is white, sand and lava stayed below).
+        // A glyph counts from DigitMatch (digits .95–1.00 on 40 pictures, letters at most
+        // .88, the "1" on letter stems up to .95 — left of the colon, never reached: the
+        // number is read from the right end as far as glyphs stand within DigitGap of each
+        // other; the colon's gap is 8 px and more). DigitOverlap/DigitPeak as NumberGlyphs.
+        public const string CounterFolder = "counter";
+        public const string LineFolder = "line";
+        public const string BoxFolder = "box";
+        public const int LineTop = 34;
+        public const int LineBottom = 66;
+        public const int LineReach = 580;
+        public const int CounterBright = 180;
+        public const double DigitMatch = .9;
+        public const double DigitOverlap = .4;
+        public const int DigitPeak = 2;
+        public const int DigitGap = 6;
+        // The bright blobs the read glyphs touch must lie within the glyphs to this share
+        // (CounterDigits.Covered): true readings .89–1.00 on the fixtures, a "1" on a "6" .47.
+        public const double DigitCoverage = .8;
+        // The keyboard button: ButtonLeft..ButtonRight right of the picture's middle, in the
+        // lowest BottomBand (it stands right of the skill bar, which the game centres: at
+        // 1690, 1300 at every window height). Scores: 1.00 on its own picture, .49–.56 on
+        // others (translucent plate), ≤ .26 without — and .51–.52 on the party emblem at
+        // the middle + 107, which beat the button on the 1080 and 2160 pictures of 07.11.
+        // when the band began at the middle + 100; so the band is as wide as the button's
+        // place can vary. The undo arrow UndoDx/UndoDy from the button's top left: .74–1.00
+        // with the counter, ≤ .52 without.
+        public const int ButtonLeft = 380;
+        public const int ButtonRight = 540;
+        public const int BottomBand = 260;
+        public const double ButtonFrom = .38;
+        public const int UndoDx = 40;
+        public const int UndoDy = -82;
+        public const int UndoSlack = 6;
+        public const double UndoFrom = .62;
+        // The counter box's black inside, from the button's top left (the digit stands in its
+        // middle, 14 px high); read with the box's own digits (CounterDigits, the set per
+        // window height in BoxFolder) in the picture at the game's size, as the line.
+        public const int BoxDx = 0;
+        public const int BoxDy = -69;
+        public const int BoxWidth = 52;
+        public const int BoxHeight = 35;
+        // The counter is read on the automatic scan's turns without a window, at most once in
+        // Every: the counter changes seldom.
+        public static readonly TimeSpan Every = TimeSpan.FromSeconds(1);
+        // After a reading that was not understood (OverlayEngine.GaugeAsync: a window height
+        // without digit pictures — nothing will change before the next start).
+        public static readonly TimeSpan UnreadEvery = TimeSpan.FromSeconds(10);
+    }
+
     // Runes of the remnant list (RuneBook): the rune tiles of a row, the crowned one, and the
     // rune in it. px at 1440. First measured on the diagnoses of 01.11.2026 (1080, 1440, 2160,
     // both UI modes) and of 26.10.2026 (scrolled keyboard lists); values marked "chosen" are
@@ -735,26 +810,34 @@ public static class Tuning
         public const double UnreadFrameFrom = 50;
 
         // The crowned tile has a gold frame (its TileFrame ring). Gold: hue GoldHueFrom to 28,
-        // saturation above 110, value above 150 — the plain brown frame has hue 9–11, the gold
-        // one 12–26 (measured 01.11. on 1080/1440/2160). Ring share with that hue: crowned
-        // .20–.60 (median .30), plain at most .14 (median .03).
+        // saturation from GoldSaturationFrom, value above 150 — the plain brown frame has hue
+        // 9–11, the gold one 12–26 (measured 01.11. on 1080/1440/2160). The painted frame is
+        // saturated gold (the median of its gold pixels 134–179 over the 55 crowned tiles of
+        // the twelve test lists); the glow a crowned frame throws into the gap beside it is
+        // pale (115–129 on the tiles next to a crown), and the ring's search (SearchX/Y) slid
+        // onto it: the inscription tile left of a crown reached .18 and passed for crowned
+        // (OFFEN F12, 02.–07.11.2026). Counted from saturation 125 the ring share is crowned
+        // .19–.60, plain at most .09 (with 111: .20 against .18); CrownRingFrom in between.
         public const int GoldHueFrom = 12;
-        public const double CrownRingFrom = .17;
-        // The ring's sides, measured 02.11.2026 (RuneBook.CrownMeasure, for the report of the
-        // Runen test): crowned tiles .06–.40 left and right over the twelve test lists, but
-        // .04 on the left of a crowned first tile of a controller row in the game the same
-        // evening; the inscription tile left of a crowned one (runen_ctrl_2160_inschrift, row
-        // 7) reaches the ring's .17 from the neighbour's glow on its right (.36) and the
-        // plate's rim below (.26), with .04 on its left (OFFEN F12). Top and bottom say
-        // nothing: the crown's spikes leave the top at .03 on crowned tiles, and at 1080 the
-        // plate's rim puts .50 under plain ones. No side rule, then.
+        public const int GoldSaturationFrom = 125;
+        public const double CrownRingFrom = .14;
+        // The ring's sides (RuneBook.CrownMeasure, for the report of the Runen test) are no
+        // rule: crowned tiles .06–.40 left and right over the twelve test lists, but .04 on
+        // the left of a crowned first tile of a controller row in the game (02.11.2026). Top
+        // and bottom say nothing: the crown's spikes leave the top at .03 on crowned tiles,
+        // and at 1080 the plate's rim puts .50 under plain ones.
 
         // The rune in a tile: the game's picture of the rune (data/runes/tome, 50 px, the
         // strokes alone) drawn at GlyphSizes px inside the tile's frame, compared as strokes
         // (distance from the parchment) by normalised correlation over the inside plus
         // GlyphSlack each side. Known from SameRuneFrom and LeadFrom ahead of the next rune.
         // Sizes: the strokes span about 40 of the 50 px at 1440 (01.11.); thresholds chosen.
-        public static readonly int[] GlyphSizes = [38, 41, 44];
+        // 42 added 08.11.2026: a crowned Earth tile read .38 and .39 at 41 (two pictures of
+        // the day, "?" in the log) and .43 and .48 at 42, the plain one .55 → .61; over the
+        // 988 tiles of the fixtures the fourth size changes one reading (a tile unread at .48
+        // reads Moon at .60) and loses none, while any three sizes with 42 lose two to five
+        // tiles that fit 41 (Power, Arcane, Stone at .43–.49). Costs a third more per tile.
+        public static readonly int[] GlyphSizes = [38, 41, 42, 44];
         public const int GlyphSlack = 3;
         public const double SaturationWeight = 3;
         // Measured 01.11. over 150 tiles at 1080/1440/2160: a tile's rune .51–.83 (the pale
@@ -917,6 +1000,11 @@ public static class Tuning
         // most this. Three seen: from the third roll without a new one (1.6 %); four: the
         // fourth (2.6 %); five: the fifth (3.1 %); six: the sixth (3.5 %). Chosen.
         public const double HiddenRumourAtMost = .05;
+
+        // RumourGameWindow.Split: a panel placed at another island than the one placed this
+        // shortly before is suspect (OFFEN F9: 0.4 s on 24.10., 0.6 s on 31.10.2026 — in that
+        // time nobody sails on). With extended diagnostics on, the picture is kept as evidence.
+        public static readonly TimeSpan SplitWithin = TimeSpan.FromSeconds(5);
     }
 
     public static class Rumours
@@ -1150,10 +1238,19 @@ public static class Tuning
         public const int BlackCaptureBelow = 8;
 
         // How long the game window may give no picture, or a black one while the screen shows
-        // the game, before the screen is read for the run (WindowsGameScreen): a client that
-        // has just started draws nothing for a moment, a loading screen is black, and the
-        // first comparison with the screen may still hold the overlay's own labels.
-        public static readonly TimeSpan WindowCaptureGrace = TimeSpan.FromSeconds(3);
+        // the game, before the screen is read instead (WindowsGameScreen): a client that has
+        // just started draws nothing for a moment, a loading screen is black, and the first
+        // comparison with the screen may still hold the overlay's own labels. A client
+        // restarted at another resolution gave nothing for 14 s after the program's second
+        // start while the screen showed its loading art (07.11.2026, OFFEN F17): 3 s was too
+        // short, and the fall-back held for the run; now it ends with the next game window
+        // (GameChanged) anyway.
+        public static readonly TimeSpan WindowCaptureGrace = TimeSpan.FromSeconds(10);
+        // After a fall-back to the screen for a black or stopped window: how often the window
+        // itself is tried again, quietly (WindowsGameScreen.Capture). A window seen before any
+        // fall-back is never "another window" (GameChanged): the game started after the
+        // program and loading longer than the grace fell back for the run (review 08.11.2026).
+        public static readonly TimeSpan CaptureRetryEvery = TimeSpan.FromSeconds(30);
 
         // An answer (prices, item art, rumour table, release) is read up to this size and
         // dropped beyond it: nothing the program asks for is anywhere near, and an endless
@@ -1194,6 +1291,47 @@ public static class Tuning
 
         // A template's word is near an OCR word within this share of its letters.
         public const int NearPart = 3;
+    }
+
+    public static class Inventory
+    {
+        // The game's inventory panel: its picture InventoryPanelUpperBackground (970×754), drawn
+        // at 1440 in the keyboard UI at .90 both ways, in the controller UI stretched .935 wide
+        // and .965 high (08.11.2026, tools/inventory_pieces.py: on 45 keyboard stash fixtures
+        // the pieces agree on the origin within 1 px at .93–.99; on the controller ones within
+        // 2 px at .60–.94, no uniform scale fits better than 20 px).
+        public const int ArtWidth = 970, ArtHeight = 754;
+        public const double KeyboardScale = .90, ControllerScaleX = .935, ControllerScaleY = .965;
+        // Pieces without items on them (data/ui/inventory-<name>.png): from the picture, cut
+        // at its own size and scaled per UI (Native false; X, Y in the picture), or, for the
+        // controller alone, cut from a screenshot at 1440 (Native true; X, Y against the
+        // panel's origin as the right statue gives it): the top right corner of the frame and
+        // the left wing of the gold display, which the tooltips of the grid's right columns
+        // leave free while they cover statues and figures (14:33 on 08.11.2026; tooltips open
+        // upwards). The controller's frame and gold display are no scaled picture of the game
+        // files (tools/inventory_shot_pieces.py).
+        public static readonly (string Name, int X, int Y, UiMode? Only, bool Native)[] Pieces =
+        [
+            ("right-statue", 790, 420, null, false),
+            ("left-statue", 0, 470, null, false),
+            ("bottom-left", 60, 620, null, false),
+            ("bottom-right", 760, 640, null, false),
+            ("ctrl-top-right", 804, 39, UiMode.Controller, true),
+            ("ctrl-gold-wing", 280, 1096, UiMode.Controller, true),
+        ];
+        // A piece counts from PieceFrom; the panel is there when two pieces agree on its origin
+        // within OriginSlack px. Pictures without the panel (remnant lists, rumour panels,
+        // scenes with loot): single pieces up to .72, no two agreeing. The controller's left
+        // and right pieces give origins 20–25 px apart (its panel is no exact scaling), so the
+        // slack is wider there than the keyboard's 1 px would need; negatives still pair never.
+        public const double PieceFrom = .60;
+        public const int OriginSlack = 12;
+        // The panel stands in the right part of the screen, its top between OriginYFrom and
+        // OriginYTo (keyboard 94, controller 136 at every height and text size measured):
+        // each piece is looked for in its band alone (a whole-frame search cost 370–620 ms,
+        // review 08.11.2026).
+        public const double SearchFrom = .45;
+        public const int OriginYFrom = 60, OriginYTo = 200;
     }
 
     public static class Waystones

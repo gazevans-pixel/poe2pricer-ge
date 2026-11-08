@@ -21,6 +21,15 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
     private int keptChanges;
     // Pictures in which the controller's cursor row was lost (Open.Kept), kept this run.
     private int keptLost;
+    // Pictures of a reading with a crowned tile whose rune was not read, or with a row without
+    // any rune (Runes), kept this run — each kind on its own. Such a picture waits
+    // EvidenceAfter before it is written: a reading that is read again within that time (the
+    // page still fading in, the first reading of a list blank or dim: four of the first six
+    // pictures on 08.11.2026) is no evidence; a list that closes before writes it at once.
+    private int keptUnknown, keptBlank;
+    private (string Kind, Mat Picture, DateTimeOffset At)? pending;
+    private readonly Lock pendingLock = new();
+    private static readonly TimeSpan EvidenceAfter = TimeSpan.FromSeconds(2);
     // The list last shown, as far as it was seen: kept when the window closes, until another
     // list is shown. In memory only.
     private volatile RemnantList? remembered;
@@ -41,8 +50,8 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
         if (whole is not null && whole.Rows.Count > rows.Length)
             context.Log($"Remnant list recognized: {whole.Rows.Count} rows known (arrow once scrolled)");
         remembered = whole ??= RemnantList.Of(rows);
-        var runes = Runes(frame.Image, list, rows, context);
         var tooltips = Pipeline.RemnantTooltips(frame.Image, list, frame.Popup);
+        var runes = Runes(frame.Image, list, rows, tooltips, context);
         return new Open(this, list, rows, RemnantReader.Signature(frame.Image, list), tooltips, frame.Image.Height, whole, frame.Popup, runes, Hover(frame, list, rows, runes, Pipeline.Remnants, mouseMoved: false), Open.InBox(tooltips, list).Length > 0, new Open.Motion { Seen = context.Now.UtcTicks, Opened = opened, PointerAtOpen = frame.Pointer });
     }
 
@@ -66,6 +75,7 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
     // diagnosis (Observe).
     private void Closed(Open open, LookContext context)
     {
+        FlushEvidence(context, now: true);
         if (context.Observe)
             return;
         // Once per showing of the list: the follow and the quick check look at the same
@@ -127,9 +137,14 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
             string how = confirm is null ? "" : " on the confirm button";
             // A row without a crowned tile (three tiles where the crown's slot would be the
             // fourth, 05.11.2026 17:49) passes nothing on: an empty link, chosen all the same.
+            // The crown on the inscription tile (the relic's fixed rune, drawn as an item's
+            // picture, 08.11.2026 11:15): the row passes that rune on, the list does not show it.
+            bool onInscription = open.Runes[open.Hover].Any(t => t.Crowned && t.Rune is null);
             context.Log(chosen.Length > 0
                 ? $"Rune chain: {Names(chosen)} chosen (row {open.Hover + 1} {where} when the list closed{how})"
-                : $"Rune chain: row {open.Hover + 1} chosen ({where} when the list closed{how}), no crowned rune in it, an empty link");
+                : onInscription
+                    ? $"Rune chain: row {open.Hover + 1} chosen ({where} when the list closed{how}), the crown on the inscription (its rune is not shown in the list), an empty link"
+                    : $"Rune chain: row {open.Hover + 1} chosen ({where} when the list closed{how}), no crowned rune in it, an empty link");
             return;
         }
         if (!anyCrown)
@@ -144,9 +159,12 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
         }
     }
 
-    // The rune tiles of every row (RuneBook.Tiles).
-    private RuneTile[][] Runes(Mat image, RemnantWindow list, RemnantRow[] rows, LookContext context)
+    // The rune tiles of every row (RuneBook.Tiles). tooltips: the game's tooltips in this
+    // picture; one inside the list box hides rows, their tiles are no evidence (Evidence).
+    private RuneTile[][] Runes(Mat image, RemnantWindow list, RemnantRow[] rows, Box[] tooltips, LookContext context)
     {
+        // A reading again: the picture of the reading before, if it waited, was no evidence.
+        DropPending();
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var rises = RuneBook.Rises(list, rows);
         var tiles = rows.Select((r, i) => Pipeline.Runes.Tiles(image, list, r, rises[i])).ToList();
@@ -164,7 +182,97 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
                 tiles.Add(more);
         }
         context.Log($"Remnant runes: {string.Join(", ", tiles.Select(row => row.Any(x => x.Crowned) ? string.Join("+", row.Where(x => x.Crowned).Select(c => (c.Rune?.Id ?? "?") + $"@{c.Index + 1}")) : "-"))} ({watch.ElapsedMilliseconds} ms)");
+        if (Open.InBox(tooltips, list).Length == 0)
+            Evidence(image, list, rows, rises, tiles, context);
         return tiles.ToArray();
+    }
+
+    // With extended diagnostics (Keep): the picture of a reading that is not to be trusted,
+    // a few of each kind per run. "runes-blank": a row the OCR read (not the one cut off at
+    // the bottom) whose tiles carry no rune at all — 08.11.2026, keyboard UI, 1440: the first
+    // reading of a list had one row of ten tiles without a rune and the next with four tiles,
+    // the list was not read again, and five seconds later the picture read whole; what the
+    // picture of the reading showed is unknown, it was not kept. "runes-unknown": a crowned
+    // tile without a rune ("?" in the log) — a rune the book does not hold, or a tile read
+    // under something; 23 of 469 lists since 01.11.2026 ended so, without a picture. A row
+    // without any rune is "runes-blank" alone, its crowns count no second time. A scrolled
+    // list's top row whose tiles lie above the list box's top edge (the name below them is
+    // read, the tiles are cut: two such pictures 08.11.2026 08:22 and 08:25) is no evidence.
+    // The crown on the inscription tile — the relic's fixed rune, drawn as an item's picture
+    // and not in the book — at the same place in every row (three rows, place 4, 08.11.2026
+    // 11:15): said, and no evidence; two rows at least, else a lone unread crown.
+    private void Evidence(Mat image, RemnantWindow list, RemnantRow[] rows, int[] rises, List<RuneTile[]> tiles, LookContext context)
+    {
+        int read = Math.Min(rows.Length, tiles.Count);
+        var blank = Enumerable.Range(0, read)
+            .Where(i => rows[i].CenterY - rises[i] - RuneTune.TileSize / 2 >= list.List.Y && tiles[i].All(t => t.Rune is null))
+            .ToArray();
+        // Over the rows the OCR read and that are not blank — numerator and denominator alike
+        // (the row cut off at the bottom has tiles but no name; review 08.11.2026).
+        var counted = Enumerable.Range(0, read).Where(i => !blank.Contains(i)).ToArray();
+        var crownedUnread = counted.SelectMany(i => tiles[i].Where(t => t.Crowned && t.Rune is null).Select(t => (Row: i, t.Index))).ToArray();
+        var inscription = crownedUnread.GroupBy(u => u.Index)
+            .Where(g => g.Count() >= 2 && g.Count() == counted.Count(i => tiles[i].Length > g.Key))
+            .Select(g => g.Key)
+            .ToArray();
+        if (inscription.Length > 0)
+            context.Log($"Remnant runes: the crown sits on the inscription at place {string.Join(", ", inscription.Select(k => k + 1))} (its rune is not shown in the list)");
+        var unknown = crownedUnread.Where(u => !inscription.Contains(u.Index)).ToArray();
+        if (context.Keep is null)
+            return;
+        if (blank.Length > 0)
+        {
+            if (keptBlank >= KeptLooks)
+                return;
+            context.Log($"Remnant runes: no rune read in row {string.Join(", ", blank.Select(i => i + 1))}");
+            Pend("runes-blank", image, context);
+        }
+        else if (unknown.Length > 0 && keptUnknown < KeptLooks)
+        {
+            context.Log($"Remnant runes: crowned tile without a rune at {string.Join(", ", unknown.Select(u => $"row {u.Row + 1} place {u.Index + 1}"))}");
+            Pend("runes-unknown", image, context);
+        }
+    }
+
+    private void Pend(string kind, Mat image, LookContext context)
+    {
+        lock (pendingLock)
+        {
+            pending?.Picture.Dispose();
+            pending = (kind, image.Clone(), context.Now);
+        }
+    }
+
+    private void DropPending()
+    {
+        lock (pendingLock)
+        {
+            pending?.Picture.Dispose();
+            pending = null;
+        }
+    }
+
+    // Writes the waiting picture once EvidenceAfter has passed without a reading again (now:
+    // at once, the list closed). Counted here, so a dropped picture costs none of the KeptLooks.
+    private void FlushEvidence(LookContext context, bool now = false)
+    {
+        (string Kind, Mat Picture, DateTimeOffset At) p;
+        lock (pendingLock)
+        {
+            if (pending is not { } q || !now && context.Now - q.At < EvidenceAfter)
+                return;
+            p = q;
+            pending = null;
+        }
+        using (p.Picture)
+        {
+            if (context.Keep is not { } keep)
+                return;
+            if (p.Kind == "runes-blank" ? keptBlank++ >= KeptLooks : keptUnknown++ >= KeptLooks)
+                return;
+            context.Log($"Remnant runes: picture kept ({p.Kind})");
+            keep(p.Kind, p.Picture);
+        }
     }
 
     private static string Names(IReadOnlyList<Rune> runes) => runes.Count == 0 ? "nothing" : string.Join("+", runes.Select(r => r.Id));
@@ -327,7 +435,7 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
             if (Occluded && !now.SequenceEqual(before))
                 return true;
             var signature = RemnantReader.Signature(frame, list);
-            if (!RemnantReader.Changed(signature, Signature, list, ignored))
+            if (!RemnantReader.Changed(signature, Signature, list, ignored) && !UnreadRowChanged(signature, list, ignored))
             {
                 if (Moving is { } back)
                     back.Last = null;
@@ -338,6 +446,36 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
             var last = motion.Last;
             motion.Last = signature;
             return last is not null && !RemnantReader.Changed(signature, last, list, ignored);
+        }
+
+        // A row whose reading holds no rune (something lay over it: the game's "Item Filter
+        // loaded successfully" message stands over the lower rows of the keyboard list for
+        // seconds after an area is entered, 08.11.2026 07:30 and 10:57): the list is read again
+        // when that row's band changes, though the whole box changes too little for
+        // ChangedAbove (two rows of seven: a mean of 3 at most, no reading again, the rows
+        // stayed without marks). Rows with runes keep the whole-box measure: the mouse moving
+        // onto a row brightens its plate by 8–19 in its band alone (hover fixtures, 1.1–1.3
+        // over the box), which is no change of the list. A row without any tile (cut off at
+        // the list's top edge when scrolled) is no such row: its band changes with every
+        // scroll and hover and never reads. The game's rune tooltip (ignored) counts here as
+        // little as in the whole-box measure (review 08.11.2026).
+        private bool UnreadRowChanged(double[] signature, RemnantWindow list, IReadOnlyList<Box> ignored)
+        {
+            int read = Math.Min(Rows.Length, Runes.Length);
+            if (read == 0)
+                return false;
+            var rises = RuneBook.Rises(list, Rows);
+            int half = list.Mode == UiMode.Controller ? RuneTune.RowHalfController : RuneTune.RowHalfKeyboard;
+            for (int i = 0; i < read; i++)
+            {
+                if (Runes[i].Length == 0 || Runes[i].Any(t => t.Rune is not null))
+                    continue;
+                int centre = (int)Math.Round(Rows[i].CenterY);
+                int top = centre - rises[i] - RuneTune.TileSize / 2;
+                if (RemnantReader.Changed(signature, Signature, list, new Box(list.List.X, top, list.List.Width, centre + half - top), ignored))
+                    return true;
+            }
+            return false;
         }
 
         // The rune classes changed in the settings window (RuneBook.SetOwn): the marks are
@@ -409,6 +547,7 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
         // beside the window.
         public Glance Glance(Mat frame, PriceBook? ready, LookContext context)
         {
+            Kind.FlushEvidence(context);
             if (Kind.Pipeline.Remnants.Locate(frame)?.Mode != List.Mode)
                 return new Glance.Gone("Remnant window no longer detected");
             if (ready is null)
@@ -429,7 +568,8 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
 
         public async Task<IOpenWindow?> FollowAsync(GameCapture.Frame frame, LookContext context)
         {
-                        var watch = System.Diagnostics.Stopwatch.StartNew();
+            Kind.FlushEvidence(context);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             var list = Kind.Pipeline.Remnants.Locate(frame.Image);
             long locate = watch.ElapsedMilliseconds;
             if (list is null)
@@ -463,7 +603,7 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
             if (whole.Rows.Count > rows.Length)
                 context.Log($"Remnant list: {whole.Rows.Count} rows known, visible from row {whole.First + 1}");
             Kind.remembered = whole;
-            var runes = Kind.Runes(frame.Image, list, rows, context);
+            var runes = Kind.Runes(frame.Image, list, rows, next.Tooltips, context);
             return next with { Rows = rows, Signature = RemnantReader.Signature(frame.Image, list), Whole = whole, Runes = runes, Hover = RemnantGameWindow.Hover(frame, list, rows, runes, Kind.Pipeline.Remnants, MouseMoved(frame)), Occluded = InBox(next.Tooltips, list).Length > 0 };
         }
 
@@ -493,7 +633,7 @@ public sealed class RemnantGameWindow(Pipeline pipeline, RuneChain chain) : IGam
                     Runes = Runes.Select(tiles => tiles.Select(t => new { t.Index, t.Crowned, Rune = t.Rune?.Id, Score = Math.Round(t.Score, 2), Lead = Math.Round(t.Lead, 2) })),
                     Hover,
                     Marks = marks,
-                    Chain = Kind.Chain.Links.Select(l => new { Runes = l.Runes.Select(r => r.Id), l.Fixed }),
+                    Chain = Kind.Chain.Rows.Select(row => new { row.Complete, Links = row.Links.Select(l => new { Runes = l.Runes.Select(r => r.Id), l.Fixed }) }),
                 },
                 marks
             );

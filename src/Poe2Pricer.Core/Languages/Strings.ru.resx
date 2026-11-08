@@ -554,6 +554,12 @@
   <data name="KeyNumLock" xml:space="preserve">
     <value>Num Lock</value>
   </data>
+  <data name="GameVersionDiffers" xml:space="preserve">
+    <value>Версия игры {0}; этот выпуск проверен с {1}. Обновление игры может изменить окна, которые читает программа.</value>
+  </data>
+  <data name="TooltipUnidentified" xml:space="preserve">
+    <value>не опознан, цены нет</value>
+  </data>
   <data name="GameTextSizeNotDefault" xml:space="preserve">
     <value>Размер текста интерфейса «{0}» проверен менее подробно: если часть окна не распознаётся, нажмите {1} и сообщите об этом.</value>
   </data>

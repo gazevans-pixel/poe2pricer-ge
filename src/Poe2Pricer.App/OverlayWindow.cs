@@ -71,6 +71,7 @@ public sealed class OverlayWindow : Window, IOverlay
     {
         layer.Rumours = rumours;
         layer.Strip = strip;
+        clearing++;
         if (!IsVisible)
             Show();
         var hwnd = new WindowInteropHelper(this).Handle;
@@ -80,16 +81,29 @@ public sealed class OverlayWindow : Window, IOverlay
         layer.InvalidateVisual();
     }
 
-    // The window stays: a hidden window keeps its last picture, and Windows shows that picture
-    // the moment the window is shown again, before the new labels are drawn — the old prices of
-    // the last window would flash up on the next one.
+    // Drawn empty, then hidden — after the render pass (ContextIdle comes behind Render), so
+    // that the layered bitmap Windows keeps for a hidden window is the empty one and not the
+    // last prices, which would flash up the moment the window is shown again. A standing
+    // window the size of the monitor, topmost, counts for Explorer as a full-screen
+    // application and keeps the auto-hide taskbar down (measured on the composition window,
+    // 07.11.2026; this window has the same styles and is not measured). A Show in between
+    // cancels the hiding.
     public void Clear()
     {
         layer.Rumours = null;
         layer.Strip = null;
         layer.Labels = [];
         layer.InvalidateVisual();
+        clearing++;
+        int mine = clearing;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (mine == clearing && IsVisible)
+                Hide();
+        }, System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
+
+    private int clearing;
 
     [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint hwnd, int index);
     [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint hwnd, int index, nint value);

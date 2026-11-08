@@ -24,9 +24,18 @@ public static class GameCapture
     // rumour panel on Image are this much larger than at the game's standard.
     // TextSize: the UI Text Size the client runs at (GameConfig.TextSize): what the game letters
     // (the tribute dialog, stack numbers) is larger than at the standard (GameConfig.TextScale).
-    public sealed record Frame(Mat Image, Box ScreenBounds, (int X, int Y)? Pointer = null, double Scale = 1, double Popup = GameConfig.StandardPopup, string Language = GameLanguage.English, string TextSize = GameConfig.StandardTextSize) : IDisposable
+    // Native: the game's part of the picture as the screen shows it, unscaled (a pixel of Image
+    // is Scale pixels of it), kept with a capture of the whole picture — for what is read
+    // better at the game's own size than at the reference's: the digits of the explosives
+    // counter (Runes.ExplosivesReader), which the game draws anew for every window height.
+    // Null with a capture of a part.
+    public sealed record Frame(Mat Image, Box ScreenBounds, (int X, int Y)? Pointer = null, double Scale = 1, double Popup = GameConfig.StandardPopup, string Language = GameLanguage.English, string TextSize = GameConfig.StandardTextSize, Mat? Native = null) : IDisposable
     {
-        public void Dispose() => Image.Dispose();
+        public void Dispose()
+        {
+            Image.Dispose();
+            Native?.Dispose();
+        }
     }
 
     // The client area as it is on the screen, with the pointer on it: what the diagnosis saves.
@@ -91,20 +100,26 @@ public static class GameCapture
             return null;
         var view = GameView.Of(w, h);
         var (from, to) = view.Part(area);
-        using var part = gameWindow
+        var part = gameWindow
             ? GrabWindow(window, origin, w, h, new Rect(view.Game.X + from.X, view.Game.Y + from.Y, from.Width, from.Height))
             : Grab(origin.X + view.Game.X + from.X, origin.Y + view.Game.Y + from.Y, from.Width, from.Height);
         if (part is null)
             return null;
         black = gameWindow && IsBlack(part);
+        var image = view.Placed(part, to);
+        // The whole picture stays with the frame at the game's own size (Frame.Native).
+        bool whole = area is null;
+        if (!whole)
+            part.Dispose();
         return new Frame(
-            view.Placed(part, to),
+            image,
             new Box(origin.X + view.Game.X, origin.Y + view.Game.Y, view.Game.Width, view.Game.Height),
             view.Point(Pointer(origin, w, h)),
             view.Scale,
             popup,
             language,
-            textSize
+            textSize,
+            whole ? part : null
         );
     }
 
@@ -216,7 +231,8 @@ public static class GameCapture
     public static Frame Stored(Mat client, (int X, int Y)? pointer = null, Box? area = null, double popup = GameConfig.StandardPopup, string language = GameLanguage.English, string textSize = GameConfig.StandardTextSize)
     {
         var view = GameView.Of(client.Width, client.Height);
-        return new Frame(view.Read(client, area), new Box(view.Game.X, view.Game.Y, view.Game.Width, view.Game.Height), view.Point(pointer), view.Scale, popup, language, textSize);
+        var native = area is null ? new Mat(client, view.Game).Clone() : null;
+        return new Frame(view.Read(client, area), new Box(view.Game.X, view.Game.Y, view.Game.Width, view.Game.Height), view.Point(pointer), view.Scale, popup, language, textSize, native);
     }
 
     [StructLayout(LayoutKind.Sequential)]

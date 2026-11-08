@@ -34,8 +34,11 @@ the newest release from github.com.
   carries it already; the chain, the runes your chosen remnants pass on in this map, stands at
   the top of the screen. The link is the row you click or confirm; Esc or the cancel button
   closes the list without one. With a controller, the name and effect of the row's rune stand
-  above the list; the mouse on a chain tile shows the same. The classes are yours to set in the
-  Runes tab.
+  above the list; the mouse on a chain tile shows the same. A map with several expeditions
+  gets a row per expedition: once the game's explosives counter says all of one are placed,
+  its row goes faint with a green check, and the next remnant starts a new row (the counter
+  is read at window heights 1080, 1440 and 2160; a logbook is one expedition, one row). The
+  classes are yours to set in the Runes tab.
 - **Special stash tabs** (orbs, essences, breach, delirium, expedition, ritual, abyss, tablets,
   socketables): a price at every filled slot.
 - **Island Rumours** panel of the Atlas: the community rating of each rumour next to its line,
@@ -99,7 +102,7 @@ under 0.2 div, yellow under 1 div, orange from 1 div; the best item of a window 
 | `…` `–` `⏳` | Waystone or tablet tooltip: the trade site is being asked, has no listing, is busy or not reachable. |
 | dot under a rune | Remnant list: the rune the row passes on, in the colour of its class. Gold: good for the loot (more rarity or more rares). Green: more monsters. Red: harder monsters. White: neither. |
 | red `✗` on a rune | Remnant list: the rune chain carries this rune already, choosing the row carries nothing new. Hollow while the link is provisional. |
-| framed tiles at the top | The rune chain of this map: one tile per rune in the order chosen, framed in the class colour. A thin frame is a provisional link (neither Esc nor the gamepad could be read). The mouse on a tile shows its name and effect. |
+| framed tiles at the top | The rune chain of this map: one tile per rune in the order chosen, framed in the class colour, one row per expedition. A thin frame is a provisional link (neither Esc nor the gamepad could be read). A faint row with a green `✓` is an expedition whose explosives are all placed. The mouse on a tile shows its name and effect. |
 
 ## Download and install
 
@@ -190,7 +193,11 @@ All three keys can be changed in the settings window.
 - In the Standard league poe.ninja lists no prices for most uniques; they show "?".
 - Recognition relies on the game's current art and layout. A game update that changes a window
   may break it until the templates are updated. Each release names the game version it was
-  built and tested against (CHANGELOG); this one: Path of Exile 2 **0.5.5e**.
+  built and tested against (CHANGELOG); this one: Path of Exile 2 **0.5.5f**. Waystone and
+  tablet prices appear only while the inventory panel is on screen (inventory, stash, vendor,
+  map device); loot on the ground is not priced. When the game
+  runs another patch number (a hotfix letter does not count), the status line says so
+  (closable; the log notes the version at every start).
 - Island Rumours: the island is recognised by the sea chart around it. Dragging or zooming the
   Atlas between two openings of the panel, or switching between keyboard and controller (another
   zoom, another view), can leave too little of the chart in common: the Atlas is drawn in
@@ -399,7 +406,9 @@ its vtables, no interop package), screen capture by GDI.
 `data/catalog` (item names, slot sizes and pictures; `tools/catalog_update.py` builds it from
 poe.ninja, the trade site's item list, the game's image service and poe2db.tw), `data/ui` (pieces of the game's interface used as
 templates; `data/ui/glyphs` holds the digits, brackets and per cent sign of its tooltip
-lettering, cut from screenshots, for a number the text recognition leaves out), `data/names`
+lettering, cut from screenshots, for a number the text recognition leaves out; `data/ui/counter`
+the digits of its explosives counter, cut from screenshots at window heights 1080, 1440 and
+2160, one set for the controller's line and one for the keyboard's button), `data/names`
 (German item names), `data/waystones` and `data/tablets` (the mod lines
 in English and German, with the trade site's ids; `tools/waystone_mods.py`,
 `tools/tablet_mods.py`), `data/runes` (the 33 runes of Expedition remnants with their names,

@@ -17,6 +17,10 @@ public sealed class ChainTracker : IDisposable
     private ClientLog? clientLog;
     private DateTimeOffset lookedForGame = DateTimeOffset.MinValue;
     private bool toldMissing;
+    private string? toldVersion;
+    private bool toldNoVersion;
+    // Told the game's version as Client.txt names it, once per change (on the timer's thread).
+    public Action<string>? GameVersion { get; set; }
     private static readonly TimeSpan Every = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LookForGame = TimeSpan.FromSeconds(10);
 
@@ -54,6 +58,16 @@ public sealed class ChainTracker : IDisposable
             // One line per area the player enters (the area's id, nothing else of the file).
             if (clientLog.Poll() is { } entered)
                 log(chain.Entered(entered.Area, entered.Seed) ? $"Rune chain: new map ({entered.Area}), chain starts anew" : $"Rune chain: area {entered.Area}");
+            if (clientLog.GameVersion is { } version && version != toldVersion)
+            {
+                toldVersion = version;
+                GameVersion?.Invoke(version);
+            }
+            else if (clientLog.GameVersion is null && !toldNoVersion)
+            {
+                toldNoVersion = true;
+                log("Game version: no user-agent line in the game's LatestClient.txt or the tail of its Client.txt");
+            }
         }
         catch (Exception e)
         {

@@ -40,7 +40,7 @@ public sealed record Scene(Box Screen, Label[] Labels, (Box Panel, RumourLine[] 
         if (!SameRumours(Rumours, other.Rumours))
             return "rumours";
         if (!(Strip is null ? other.Strip is null : Strip.SameAs(other.Strip)))
-            return $"strip {Strip?.Title}/{Strip?.Hover}/{Strip?.Caption} → {other.Strip?.Title}/{other.Strip?.Hover}/{other.Strip?.Caption}";
+            return $"strip {Strip?.ToString() ?? "none"} → {other.Strip?.ToString() ?? "none"}";
         return "nothing";
     }
 
@@ -126,10 +126,11 @@ public sealed class OverlayEngine : IDisposable
     public event Action<StatusMessage>? Status;
     public event Action<string?>? Diagnosed;
 
-    public OverlayEngine(GameWindows windows, IGameScreen screen, IPrices prices, Func<RumourBook> rumours, Settings settings, TimeProvider time, Action<string> log, RuneChain? chain = null)
+    public OverlayEngine(GameWindows windows, IGameScreen screen, IPrices prices, Func<RumourBook> rumours, Settings settings, TimeProvider time, Action<string> log, RuneChain? chain = null, ExplosivesReader? explosives = null)
     {
         this.windows = windows;
         this.chain = chain;
+        this.explosives = explosives;
         this.screen = screen;
         this.prices = prices;
         this.rumours = rumours;
@@ -205,15 +206,54 @@ public sealed class OverlayEngine : IDisposable
     // where the tiles are; null: no mouse looked up.
     private RuneStrip? Standing(double? width = null)
     {
-        if (chain is null || chain.InHaven || chain.Links is not { Count: > 0 } links)
+        if (chain is null || chain.InHaven || RuneStrip.Of(chain.Rows, n => Texts.Get("OverlayRuneChain", n)) is not { } made)
             return null;
-        var runes = links.SelectMany(l => l.Runes.Select(r => (Rune: r, l.Fixed))).ToArray();
-        if (runes.Length == 0)
-            return null;
-        var entries = runes.Select(x => new StripEntry(x.Rune.Id, RuneBook.KeyOf(x.Rune.Class), x.Fixed)).ToArray();
-        var strip = new RuneStrip(Texts.Get("OverlayRuneChain", entries.Length), entries);
-        int hover = width is { } w ? strip.TileAt(pointer, w) : -1;
-        return hover < 0 ? strip : strip with { Hover = hover, Caption = $"{runes[hover].Rune.Name(language)}  ·  {runes[hover].Rune.Effect(language)}" };
+        var (strip, runes) = made;
+        if (width is not { } w || strip.TileAt(pointer, w) is not { } hover)
+            return strip;
+        var rune = runes[hover.Row][hover.Index];
+        return strip with { Hover = hover, Caption = $"{rune.Name(language)}  ·  {rune.Effect(language)}" };
+    }
+
+    // The game's explosives counter (ExplosivesReader), read on the automatic scan's turns
+    // that find no window (an open list hides the HUD anyway), at most once in
+    // Tuning.Explosives.Every: all placed closes the open expedition's chain
+    // (RuneChain.Complete). Not in a logbook: the map is one expedition there. Off the
+    // control's thread, inside the scan's capture.
+    private readonly ExplosivesReader? explosives;
+    private DateTimeOffset gaugeNotBefore = DateTimeOffset.MinValue;
+    private ExplosivesReading? gauged;
+    private (string Area, long Seed)? unreadIn;
+
+    private async Task GaugeAsync(GameCapture.Frame frame)
+    {
+        if (explosives is null || chain is null || !chain.Tracked || chain.InHaven || chain.InLogbook || !settings.AutoRemnant)
+            return;
+        var now = time.GetUtcNow();
+        if (now < gaugeNotBefore)
+            return;
+        gaugeNotBefore = now + Tuning.Explosives.Every;
+        var reading = explosives.Read(frame);
+        if (reading is null)
+            return;
+        bool changed = !reading.Equals(gauged);
+        gauged = reading;
+        if (reading is ExplosivesUnread u)
+        {
+            // No digit pictures for this window height: told once per map, and the counter is
+            // not read again before UnreadEvery.
+            if (unreadIn != chain.Instance)
+                log($"Rune chain: the explosives counter was found but not understood ({u})");
+            unreadIn = chain.Instance;
+            gaugeNotBefore = now + Tuning.Explosives.UnreadEvery;
+            return;
+        }
+        // Complete is asked whenever all are placed, not only on a change: the same reading
+        // ("5/5") at the next expedition's site must close that one too.
+        if (reading.AllPlaced && chain.Complete())
+            log($"Rune chain: explosives {reading}, the expedition's chain is complete; the next remnant starts a new one");
+        else if (changed)
+            log($"Rune chain: explosives {reading}");
     }
 
     // The mouse moved: the rune chain's caption may come or go. Draws only when the scene
@@ -536,6 +576,8 @@ public sealed class OverlayEngine : IDisposable
                 try
                 {
                     var seen = captured is null ? null : await windows.LookAsync(captured, context, wanted);
+                    if (seen is null && captured is not null && quiet)
+                        await GaugeAsync(captured);
                     // Not the look of the automatic scan that finds nothing: it comes twice a
                     // second while the game is in front and would fill the log.
                     if (!quiet || seen is not null)

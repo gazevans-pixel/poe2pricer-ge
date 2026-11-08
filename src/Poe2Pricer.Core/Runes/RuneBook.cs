@@ -241,8 +241,14 @@ public sealed class RuneBook : IDisposable
         // An unread tile that counts has a tile's frame (UnreadFrameFrom): the parchment's
         // sketches beyond the last tile pass the weaker frame test and can even pass for a
         // rune a column on (.49 on the page's drawings, 01.11.).
+        // Up to the last crowned tile every tile stays: a tile that holds an item's picture
+        // instead of a rune ("Breath of Aldur", 02.11.2026: a grey picture on the sixth tile,
+        // the crown on the seventh) has a frame too shallow for an unread tile between read
+        // ones (46 against UnreadFrameFrom 50), and a crown behind it is no sketch — beyond the
+        // last tile the gold share of the ring measured .00–.04 over the forty rows of six
+        // lists (07.11.2026). A rune read behind it would not do: the sketches pass for one.
         int end = tiles.Count;
-        for (int i = 0; i < tiles.Count; i++)
+        for (int i = tiles.FindLastIndex(t => t.Crowned) + 1; i < tiles.Count; i++)
             if (!Known(tiles[i]) && (i > 0 && !Known(tiles[i - 1]) || FrameDepth(bgr, tiles[i].X, tiles[i].Y) < Tune.UnreadFrameFrom))
             {
                 end = i;
@@ -467,12 +473,14 @@ public sealed class RuneBook : IDisposable
         return bestScore >= Tune.SameRuneFrom && lead >= Tune.LeadFrom ? (best, bestScore, lead) : (null, bestScore, lead);
     }
 
-    // The crown: gold in the tile's frame ring, searched pixel by pixel a few px around the
-    // nominal place. (The three gold spikes above the tile are no help on their own: measured
-    // .07–.36 on crowned tiles and up to .15 on plain ones, 01.11.) The ring alone: a rule
-    // that asked for gold on both the ring's left and right side as well (02.11.2026, against
-    // the inscription tile left of a crowned one, OFFEN F12) lost real crowns on the first
-    // tile of a controller row the same evening (ring .24, left .04).
+    // The crown: painted gold in the tile's frame ring, searched pixel by pixel a few px
+    // around the nominal place. (The three gold spikes above the tile are no help on their
+    // own: measured .07–.36 on crowned tiles and up to .15 on plain ones, 01.11.) The ring
+    // alone: a rule that asked for gold on both the ring's left and right side as well
+    // (02.11.2026, against the inscription tile left of a crowned one, OFFEN F12) lost real
+    // crowns on the first tile of a controller row the same evening (ring .24, left .04).
+    // What kept that tile out in the end is the colour: a crowned neighbour's glow in the
+    // gap is pale gold, the painted frame saturated (Tune.GoldSaturationFrom, 07.11.2026).
     public static bool Crowned(Mat bgr, int cx, int cy) => CrownRing(bgr, cx, cy) >= Tune.CrownRingFrom;
 
     public static double CrownRing(Mat bgr, int cx, int cy) => CrownMeasure(bgr, cx, cy).Ring;
@@ -518,7 +526,7 @@ public sealed class RuneBook : IDisposable
         using var hsv = new Mat();
         Cv2.CvtColor(part, hsv, ColorConversionCodes.BGR2HSV);
         var mask = new Mat();
-        Cv2.InRange(hsv, new Scalar(Tune.GoldHueFrom, 111, 151), new Scalar(28, 255, 255), mask);
+        Cv2.InRange(hsv, new Scalar(Tune.GoldHueFrom, Tune.GoldSaturationFrom, 151), new Scalar(28, 255, 255), mask);
         return mask;
     }
 

@@ -226,8 +226,8 @@ as of 2026-11-01 (patch 0.5.5e).
 ## Game interface pieces (`data/ui`, game material)
 
 The small pictures in `data/ui` are pieces of the interface of Path of Exile 2, used as
-templates to find windows, tooltips, buttons and stash tabs in a capture: cut from the game's
-interface files or from screenshots of the game. `data/ui/glyphs` holds 15 such pictures of
+templates to find windows, tooltips, buttons, stash tabs and the inventory panel in a capture:
+cut from the game's interface files or from screenshots of the game. `data/ui/glyphs` holds 15 such pictures of
 the lettering of item tooltips, the digits 0 to 9, the brackets, the minus, plus and per cent
 signs, cut from screenshots at popup size 1.0; poe2pricer compares them with a tooltip where
 the text recognition left a number out. All of these are material of Grinding Gear Games. The

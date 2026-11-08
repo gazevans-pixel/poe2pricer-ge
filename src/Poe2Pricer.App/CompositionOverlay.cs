@@ -213,8 +213,13 @@ public sealed unsafe class CompositionOverlay : IOverlay, IDisposable
         measuredSum = measuredMax = 0;
     }
 
-    // The window stays and shows a fully transparent picture (as the WPF window keeps drawing
-    // nothing): a hidden window would show its last picture the moment it is shown again.
+    // A fully transparent picture first, then the window is hidden: a hidden window shows its
+    // last picture the moment it is shown again, and that picture is now the empty one. Until
+    // 07.11.2026 the window stayed standing, transparent, after Clear — and Explorer counts a
+    // visible topmost window the size of the monitor as a full-screen application whatever it
+    // draws, and keeps the auto-hide taskbar from coming up over every other window (measured
+    // on Windows 11: Shell_TrayWnd loses WS_EX_TOPMOST while the window stands, regains it
+    // within 3 s once it is hidden). Without the game in front there is no window now.
     public void Clear()
     {
         layer.Rumours = null;
@@ -222,6 +227,11 @@ public sealed unsafe class CompositionOverlay : IOverlay, IDisposable
         layer.Labels = [];
         if (swapChain != 0)
             Present(width, height, draw: false);
+        if (visible)
+        {
+            ShowWindow(hwnd, 0 /* SW_HIDE */);
+            visible = false;
+        }
     }
 
     // A lost device (driver update, GPU reset: DXGI_ERROR_DEVICE_REMOVED and the like) is built

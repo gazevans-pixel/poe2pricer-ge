@@ -82,7 +82,7 @@
 <p class="tagline ru">Рыночные цены с poe.ninja · Ритуал · Останки · Слухи об островах · Сундук · Путевые камни · Плитки</p>
     <p class="tagline de">Marktpreise von poe.ninja · Gaben · Relikte · Inselgerüchte · Truhen-Tabs · Waystones · Tablets</p>
     <!-- The version is written here by tools/build_release.py. -->
-    <p class="meta"><span id="version-label">Version</span> <span id="version">1.5.0</span> · saxe78 · <a href="https://github.com/saxe78/poe2pricer">github.com/saxe78/poe2pricer</a> · MIT</p>
+    <p class="meta"><span id="version-label">Version</span> <span id="version">1.5.1</span> · saxe78 · <a href="https://github.com/saxe78/poe2pricer">github.com/saxe78/poe2pricer</a> · MIT</p>
   </div>
   <div class="switch" role="group" aria-label="Language">
     <button type="button" data-set="en">English</button>
@@ -200,7 +200,7 @@ gelb unter 1 div, orange ab 1 div. Der wertvollste Gegenstand eines Fensters ist
   <tr><td><code>…</code> <code>–</code> <code>⏳</code></td><td>At a waystone's or tablet's tooltip: the price is being asked, no listing, the trade site busy (see <a href="#waystones">Waystones</a>).</td></tr>
   <tr><td>dot under a rune</td><td>In the remnant list: the rune the row passes on, in the colour of its class. Gold: good for the loot (more rarity or more rares). Green: more monsters. Red: harder monsters. White: neither. The classes are yours to set in the Runes tab.</td></tr>
   <tr><td>red <code>✗</code> on a rune</td><td>In the remnant list: the rune chain carries this rune already, choosing the row carries nothing new. Hollow while the link is provisional.</td></tr>
-  <tr><td>framed tiles at the top</td><td>The rune chain of this map: one tile per rune in the order chosen, framed in the class colour, the count in the title. A thin frame is a provisional link (neither Esc nor the gamepad could be read). The mouse on a tile shows its name and effect.</td></tr>
+  <tr><td>framed tiles at the top</td><td>The rune chain of this map: one tile per rune in the order chosen, framed in the class colour, the count in the title, one row per expedition. A thin frame is a provisional link (neither Esc nor the gamepad could be read). A faint row with a green ✓ is an expedition whose explosives are all placed. The mouse on a tile shows its name and effect.</td></tr>
 </table>
 <table class="ru"><tr><th>Знак</th><th>Значение</th></tr><tr><td><code>?</code></td><td>Предмет распознан, но у poe.ninja нет цены.</td></tr><tr><td><code>&lt;</code></td><td>Цена ниже заданного порога.</td></tr><tr><td><code>!</code> (красный)</td><td>Затемнённое знамение, тип которого нельзя определить по одному значку. Наведите мышь или курсор контроллера: программа прочитает подсказку и покажет цену.</td></tr><tr><td><code>▲</code> <code>▼</code></td><td>В списке останков: самая дорогая награда находится за пределами видимой части в указанном направлении.</td></tr><tr><td><code>…</code> <code>–</code> <code>⏳</code></td><td>У подсказки путевого камня или плитки: идёт запрос цены; предложений нет; торговая площадка занята или недоступна (см. <a href="#waystones">«Путевые камни»</a>).</td></tr><tr><td>точка под руной</td><td>В списке останков: руна, которую строка передаёт дальше, цветом своего класса. Золотая: полезна для добычи (больше редкости или редких монстров). Зелёная: больше монстров. Красная: монстры сильнее. Белая: ни то ни другое. Классы задаются на вкладке «Руны».</td></tr><tr><td>красный <code>✗</code> на руне</td><td>В списке останков: цепь рун уже несёт эту руну, выбор строки ничего нового не даёт. Пустой знак — пока звено предположительное.</td></tr><tr><td>плитки в рамках вверху экрана</td><td>Цепь рун этой карты: по плитке на руну в порядке выбора, в рамке цвета класса, в заголовке — их число. Тонкая рамка — предположительное звено (ни Esc, ни геймпад прочитать не удалось). Мышь на плитке показывает её название и эффект.</td></tr></table>
 <table class="de">
@@ -260,24 +260,37 @@ is the row you click, or with a controller the row the cursor's arrow points at 
 confirm button; Esc or the cancel button closes the list without one. Where neither Esc nor the gamepad
 can be read, the link stays provisional. The chain starts anew with the next map and survives a trip to
 the hideout (where it is not shown); <strong>Reset rune chain</strong> in the Runes tab empties it by
-hand. For the map change the program reads the area lines of the game's logs\Client.txt; nothing else
-of that file.</p>
+hand. A map with several expeditions gets a row per expedition: once the game's explosives counter
+(the block under "Map Content" with a controller, the number over the explosive button with the
+keyboard) says all of one are placed, its row goes faint with a green check, and the next remnant
+starts a new row; the counter is read at window heights 1080, 1440 and 2160, and a logbook is one
+expedition. For the map change the program reads the area lines of the game's
+logs\Client.txt; nothing else of that file.</p>
 <p class="ru">Цепь рун — руны, которые передают выбранные вами останки на этой карте, — показывается вверху
 экрана, по плитке на руну в порядке выбора; мышь на плитке показывает её название и эффект. Звено — это
 строка, по которой вы щёлкнули, а с контроллером — строка под стрелкой курсора в момент нажатия кнопки
 подтверждения; Esc или кнопка отмены закрывает список без выбора. Там, где ни Esc, ни геймпад прочитать
 нельзя, звено остаётся предположительным. Цепь начинается заново со следующей картой и переживает визит
 в убежище (там она не показывается); <strong>Сбросить цепь рун</strong> на вкладке «Руны» очищает её
-вручную. Смену карты программа узнаёт из строк об области в logs\Client.txt игры; больше ничего из этого
-файла не читается.</p>
+вручную. Карта с несколькими экспедициями получает по строке на экспедицию: как только счётчик взрывчатки
+игры (блок под «Содержимое карты» с контроллером, число над кнопкой взрывчатки с клавиатурой) показывает,
+что вся взрывчатка одной из них установлена, её строка бледнеет и получает зелёную галочку, а следующий
+останок начинает новую строку; счётчик читается при высоте окна 1080, 1440 и 2160, а журнал экспедиции —
+одна экспедиция. Смену карты программа узнаёт из строк об области в logs\Client.txt игры;
+больше ничего из этого файла не читается.</p>
 <p class="de">Die Runenkette, die Runen, die deine gewählten Relikte in dieser Map weitergeben, steht oben am
 Bildschirm, eine Kachel je Rune in der Reihenfolge der Wahl; die Maus auf einer Kachel zeigt Name und
 Wirkung. Das Glied ist die Zeile, die du anklickst, am Controller die Zeile, auf die der Pfeil des Cursors
 zeigt, wenn du die Bestätigen-Taste drückst; Esc oder die Abbruchtaste schließt die Liste ohne Glied. Wo
 weder Esc noch das Gamepad lesbar ist, bleibt das Glied vorläufig. Die Kette beginnt mit der nächsten Map
 neu und übersteht den Gang ins Versteck (dort wird sie nicht gezeigt); <strong>Runenkette
-zurücksetzen</strong> im Reiter Runen leert sie von Hand. Den Map-Wechsel liest das Programm aus den
-Gebietszeilen der logs\Client.txt des Spiels; sonst nichts aus dieser Datei.</p>
+zurücksetzen</strong> im Reiter Runen leert sie von Hand. Eine Map mit mehreren Expeditionen bekommt
+je Expedition eine Zeile: sobald der Sprengstoff-Zähler des Spiels (am Controller der Block unter
+„Map Content“, an der Tastatur die Zahl über dem Sprengsatz-Knopf) alle Sprengsätze einer Expedition
+als gesetzt zeigt, wird ihre Zeile blass und bekommt einen grünen Haken, und das nächste Relikt beginnt
+eine neue Zeile; der Zähler wird bei den Fensterhöhen 1080, 1440 und 2160 gelesen, ein Logbuch ist eine
+Expedition. Den Map-Wechsel liest das Programm aus den Gebietszeilen der logs\Client.txt des
+Spiels; sonst nichts aus dieser Datei.</p>
 <figure><img src="window-runes.png" width="780" height="776" alt="The Runes tab: each rune with its effect and the class it is given." data-alt-en="The Runes tab: each rune with its effect and the class it is given." data-alt-ru="Вкладка «Руны»: каждая руна с её эффектом и классом." data-src-en="window-runes.png" data-src-ru="window-runes-ru.png"><figcaption class="en">The Runes tab: picture, name and effect of every rune, and its class.</figcaption>
 <figcaption class="ru">Вкладка «Руны»: изображение, название и эффект каждой руны и её класс.</figcaption><figcaption class="de">Der Reiter Runen: Bild, Name und Wirkung jeder Rune und ihre Klasse.</figcaption></figure>
 <figure><img src="remnant-runes.png" width="740" height="840" alt="Remnant list: a coloured dot under the highlighted rune of each row, a ✗ badge where the chain carries that rune already, the price at the right." data-alt-en="Remnant list: a coloured dot under the highlighted rune of each row, a ✗ badge where the chain carries that rune already, the price at the right." data-alt-ru="Список останков: цветная точка под выделенной руной каждой строки, значок ✗ там, где цепь уже несёт эту руну, цена справа."><figcaption class="en">Remnant list: a coloured dot under the highlighted rune of each row, a ✗ badge where the chain carries that rune already, the price at the right.</figcaption><figcaption class="ru">Список останков: цветная точка под выделенной руной каждой строки, значок ✗ там, где цепь уже несёт эту руну, цена справа.</figcaption><figcaption class="de">Relikt-Liste: ein farbiger Punkt unter der hervorgehobenen Rune jeder Zeile, ein ✗ dort, wo die Kette die Rune schon trägt, der Preis rechts.</figcaption></figure>
