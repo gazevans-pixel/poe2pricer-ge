@@ -7,23 +7,41 @@ namespace Poe2Pricer.Core;
 
 // A special stash tab (Orbs, Essence, Delirium, Breach, Ritual, Abyss, Expedition, …): filled
 // slots named by the tab layout or against the poe.ninja item art, covered slots left out.
-public sealed class StashGameWindow(Pipeline pipeline) : IGameWindow
+// The inventory is open with the stash, always (the author, 08.11.2026): a waystone's or tablet's
+// tooltip there is content of this window — read, priced and labelled through the tooltip
+// window (tooltips), its price at the title bar beside the slot labels, its status in the
+// strip while it stands. The engine shows one window at a time; without this the tooltip was
+// never looked for while a stash tab was shown (diagnosis 08.11.2026 14:45).
+public sealed class StashGameWindow(Pipeline pipeline, TooltipGameWindow? tooltips = null) : IGameWindow
 {
     internal Pipeline Pipeline { get; } = pipeline;
+    internal TooltipGameWindow? Tooltips { get; } = tooltips;
 
-    public WindowProfile Profile { get; } = new("Stash", AutoSwitch.Stash, GameWindows.FollowEvery);
+    public WindowProfile Profile { get; } = new("Stash", AutoSwitch.Stash);
 
     private PriceBook? iconsFor;
 
     public bool IsThere(GameCapture.Frame frame) => Pipeline.Stash.Locate(frame.Image) is not null;
 
-    public Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context)
+    public async Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context)
     {
         if (Pipeline.Stash.Locate(frame.Image, StashTabReader.MinimumScore) is not { } tab)
-            return Task.FromResult<IOpenWindow?>(null);
+            return null;
         var slots = Read(frame.Image, tab, frame.Popup);
         context.Log(Invariant($"stash tab {tab.Kind} {tab.AnchorScore:0.00}, {slots.Count(s => s.Present)} occupied, {slots.Count(s => s.Covered)} covered"));
-        return Task.FromResult<IOpenWindow?>(new Open(this, tab, slots));
+        return new Open(this, tab, slots, await TooltipAsync(frame, context, null));
+    }
+
+    // The waystone's or tablet's tooltip on the frame, as the tooltip window reads it: the one
+    // shown followed (another item at its place, its values read again); none, or gone, a new
+    // one looked for on the same frame.
+    private async Task<TooltipGameWindow.Open?> TooltipAsync(GameCapture.Frame frame, LookContext context, TooltipGameWindow.Open? shown)
+    {
+        if (Tooltips is null)
+            return null;
+        if (shown is not null && await shown.FollowAsync(frame, context) is TooltipGameWindow.Open followed)
+            return followed;
+        return await Tooltips.LookAsync(frame, context, hosted: true) as TooltipGameWindow.Open;
     }
 
     // The slots, and besides what the reader sees itself (a popup's dark body): a slot counts
@@ -65,13 +83,34 @@ public sealed class StashGameWindow(Pipeline pipeline) : IGameWindow
         public bool Seen;
     }
 
-    private sealed record Open(StashGameWindow Kind, StashTabWindow Tab, StashSlot[] Slots) : IOpenWindow
+    // Tooltip: the waystone's or tablet's tooltip in the inventory beside the tab (or over it),
+    // as the tooltip window holds it; null: none stands.
+    private sealed record Open(StashGameWindow Kind, StashTabWindow Tab, StashSlot[] Slots, TooltipGameWindow.Open? Tooltip = null) : IOpenWindow, ITooltipHost
     {
         private readonly Blank blank = new();
 
         public IGameWindow Window => Kind;
 
-        public Box? GlanceArea => Kind.Pipeline.Stash.LookArea(Tab);
+        IOpenWindow? ITooltipHost.Tooltip => Tooltip;
+
+        public IOpenWindow WithTooltip(IOpenWindow tooltip) => this with { Tooltip = (TooltipGameWindow.Open)tooltip };
+
+        // The tab with its subtab buttons, and the title row of the tooltip shown: whether it
+        // still looks as it did.
+        public Box? GlanceArea
+        {
+            get
+            {
+                var area = Kind.Pipeline.Stash.LookArea(Tab);
+                return Tooltip?.GlanceArea is { } title ? area.Union(title) : area;
+            }
+        }
+
+        // The whole picture: a tooltip may open anywhere between the tab and the inventory, and
+        // its body reaches below its title (TooltipGameWindow). Without the tooltip window, the
+        // tab with its subtab buttons alone: the slots, the blank check and the key hints lie
+        // in it.
+        public Box? FollowArea => Kind.Tooltips is null ? Kind.Pipeline.Stash.LookArea(Tab) : null;
 
         // A tooltip over the tab lowers the score, so a lower bar than for the first look. Another
         // tab counts at once: otherwise every glance found "another tab" again and cancelled the
@@ -89,11 +128,36 @@ public sealed class StashGameWindow(Pipeline pipeline) : IGameWindow
         // the ground is in view.
         public Glance Glance(Mat frame, PriceBook? ready, LookContext context)
         {
+            var tab = TabGlance(frame, context);
+            if (tab is not Core.Glance.Same || Tooltip is null)
+                return tab;
+            // The tooltip went: its label goes, the tab stays. Its price came in: labelled anew.
+            switch (Tooltip.Glance(frame, ready, context))
+            {
+                case Core.Glance.Gone gone:
+                    // Said once: the engine drops a glance's relabel while a follow runs, and
+                    // the next glance finds the tooltip gone again (log 08.11.2026 15:36,
+                    // sixteen lines in a second).
+                    if (Tooltip.Misses == Tuning.Waystones.GoneAfterMisses)
+                        context.Log(gone.Why);
+                    return new Glance.Relabel(this with { Tooltip = null });
+                case Core.Glance.Relabel relabel:
+                    return new Glance.Relabel(this with { Tooltip = (TooltipGameWindow.Open)relabel.Next });
+                default:
+                    return Core.Glance.Unchanged;
+            }
+        }
+
+        private Glance TabGlance(Mat frame, LookContext context)
+        {
             var now = Kind.Pipeline.Stash.Locate(frame, StashTabReader.MinimumScore);
             if (now is null)
             {
                 if (!Kind.Pipeline.Stash.IsBlank(frame))
+                {
+                    Tooltip?.Drop();
                     return new Glance.Gone("stash tab no longer detected");
+                }
                 if (blank.Seen)
                     return Core.Glance.Unchanged;
                 blank.Seen = true;
@@ -110,7 +174,7 @@ public sealed class StashGameWindow(Pipeline pipeline) : IGameWindow
         }
 
         // Reading all slots costs a few milliseconds, cheaper than deciding whether to.
-        public Task<IOpenWindow?> FollowAsync(GameCapture.Frame frame, LookContext context)
+        public async Task<IOpenWindow?> FollowAsync(GameCapture.Frame frame, LookContext context)
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var tab = Kind.Pipeline.Stash.Locate(frame.Image, StashTabReader.MinimumScore);
@@ -121,17 +185,18 @@ public sealed class StashGameWindow(Pipeline pipeline) : IGameWindow
                 {
                     blank.Seen = true;
                     context.Log("stash tab bare, kept");
-                    return Task.FromResult<IOpenWindow?>(this with { Slots = [] });
+                    return this with { Slots = [], Tooltip = await Kind.TooltipAsync(frame, context, Tooltip) };
                 }
+                Tooltip?.Drop();
                 context.Log("hidden: stash tab no longer detected");
-                return Task.FromResult<IOpenWindow?>(null);
+                return null;
             }
             // Seen is reset by the glance that finds a tab, not here: a follow that read the
             // tab before the ground came may finish after the glance saw the ground, and would
             // have the next glance log and keep the ground again.
             var slots = Kind.Read(frame.Image, tab, frame.Popup);
             context.Log(Invariant($"Time: stash tab {watch.ElapsedMilliseconds} ms, {tab.Kind} {tab.AnchorScore:0.00}, {slots.Count(s => s.Present)} occupied, {slots.Count(s => s.Covered)} covered"));
-            return Task.FromResult<IOpenWindow?>(this with { Tab = tab, Slots = slots });
+            return this with { Tab = tab, Slots = slots, Tooltip = await Kind.TooltipAsync(frame, context, Tooltip) };
         }
 
         public async Task<Picture> LabelAsync(GameCapture.Frame frame, Task<PriceBook> prices, LookContext context)
@@ -144,15 +209,20 @@ public sealed class StashGameWindow(Pipeline pipeline) : IGameWindow
             var settings = context.Settings;
             var labels = Labels.ForStash(named.Where(s => !s.Covered), book, Labels.FloorInDivine(settings.FloorValue, settings.FloorUnit, book), settings.PriceUnit);
             int present = named.Count(s => s.Present);
+            // The tooltip's picture: its price label joins the slot labels; its status stands
+            // in the strip while it is shown (the item under the mouse is what is looked at).
+            var tooltip = Tooltip is null ? null : await Tooltip.LabelAsync(frame, prices, context);
+            string status = labels.All(l => l.Text is null) && present > 0 && settings.FloorValue > 0
+                ? Texts.Count("StashAllBelowThreshold", present, settings.FloorValue, settings.FloorUnit, Tab.Kind)
+                : Texts.Get("StashStatus", Tab.Kind, Texts.Count("Items", present), Texts.Count("Prices", labels.Count(l => l.Text is not null)), book.League);
+            string shown = Slots.Length == 0 && blank.Seen ? $"{Tab.Kind} tab ({Tab.Mode}), bare (changing)" : $"{Tab.Kind} tab ({Tab.Mode}), {present} occupied, {labels.Length} labels";
             return new Picture(
-                this with { Slots = named },
-                labels,
+                this with { Slots = named, Tooltip = tooltip?.Next as TooltipGameWindow.Open },
+                tooltip is null ? labels : [.. labels, .. tooltip.Labels],
                 null,
-                labels.All(l => l.Text is null) && present > 0 && settings.FloorValue > 0
-                    ? Texts.Count("StashAllBelowThreshold", present, settings.FloorValue, settings.FloorUnit, Tab.Kind)
-                    : Texts.Get("StashStatus", Tab.Kind, Texts.Count("Items", present), Texts.Count("Prices", labels.Count(l => l.Text is not null)), book.League),
-                Slots.Length == 0 && blank.Seen ? $"{Tab.Kind} tab ({Tab.Mode}), bare (changing)" : $"{Tab.Kind} tab ({Tab.Mode}), {present} occupied, {labels.Length} labels",
-                new { Window = "stash", Tab, Slots = named, Labels = labels }
+                tooltip?.Status ?? status,
+                tooltip is null ? shown : $"{shown}; {tooltip.Shown}",
+                new { Window = "stash", Tab, Slots = named, Labels = labels, Tooltip = tooltip?.Description }
             );
         }
     }

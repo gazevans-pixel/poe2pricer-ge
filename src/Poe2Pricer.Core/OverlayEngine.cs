@@ -2,12 +2,78 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using OpenCvSharp;
 using Poe2Pricer.Core.Market;
+using Poe2Pricer.Core.Runes;
 
 namespace Poe2Pricer.Core;
 
 // What the overlay draws now. Screen: the game's part of the screen. Labels and Rumours are in
 // the coordinates of the reference picture (GameView); Scale: screen pixels per pixel of it.
-public sealed record Scene(Box Screen, Label[] Labels, (Box Panel, RumourLine[] Lines, IslandSummary? Island)? Rumours, double Scale = 1);
+// Marks: drawn as well, no prices (Picture.Marks); Shown leaves them out. Strip: the rune
+// chain of this map at the top of the screen, with or without a window (OverlayEngine.Standing).
+public sealed record Scene(Box Screen, Label[] Labels, (Box Panel, RumourLine[] Lines, IslandSummary? Island)? Rumours, double Scale = 1, Label[]? Marks = null, RuneStrip? Strip = null)
+{
+    // Everything to draw: the labels, then the marks over them.
+    public Label[] All => Marks is { Length: > 0 } m ? [.. Labels, .. m] : Labels;
+
+    // The same picture: every label, line and island entry alike (the record's own equality
+    // compares the arrays by reference). OverlayEngine.Show draws only a scene that differs
+    // from the one drawn last: at 3840×2160 the Ritual window was drawn 2.5 times a second
+    // while nothing changed (every glance that saw the cursor move brought a follow; log
+    // 31.10.2026), each picture 19 ms on the UI thread.
+    public bool SameAs(Scene other) =>
+        Screen == other.Screen && Scale == other.Scale && Labels.AsSpan().SequenceEqual(other.Labels) && (Marks ?? []).AsSpan().SequenceEqual(other.Marks ?? []) && SameRumours(Rumours, other.Rumours) && (Strip is null ? other.Strip is null : Strip.SameAs(other.Strip));
+
+    // What differs from the other scene, for the log (extended diagnostics): the first part
+    // that does, with both values where they are short. Evidence for a picture drawn anew
+    // while nothing should have changed (02.11.2026: the caption above the controller's
+    // remnant list flickered about once a second, one picture a second in the count).
+    public string Differs(Scene other)
+    {
+        if (Screen != other.Screen)
+            return $"screen {Screen} → {other.Screen}";
+        if (Scale != other.Scale)
+            return $"scale {Scale} → {other.Scale}";
+        if (!Labels.AsSpan().SequenceEqual(other.Labels))
+            return "labels: " + FirstDifference(Labels, other.Labels);
+        if (!(Marks ?? []).AsSpan().SequenceEqual(other.Marks ?? []))
+            return "marks: " + FirstDifference(Marks ?? [], other.Marks ?? []);
+        if (!SameRumours(Rumours, other.Rumours))
+            return "rumours";
+        if (!(Strip is null ? other.Strip is null : Strip.SameAs(other.Strip)))
+            return $"strip {Strip?.ToString() ?? "none"} → {other.Strip?.ToString() ?? "none"}";
+        return "nothing";
+    }
+
+    private static string FirstDifference(Label[] a, Label[] b)
+    {
+        if (a.Length != b.Length)
+            return $"{a.Length} → {b.Length}";
+        for (int i = 0; i < a.Length; i++)
+            if (a[i] != b[i])
+                return $"#{i} " + string.Join(", ", LabelFields.Where(f => !Equals(f.GetValue(a[i]), f.GetValue(b[i]))).Select(f => $"{f.Name}: {f.GetValue(a[i]) ?? "null"} → {f.GetValue(b[i]) ?? "null"}"));
+        return "same";
+    }
+
+    // The fields of a label, for the log: only those that differ (a whole label is a line of
+    // its own with its caption; 05.11.2026: 43 such lines of a kilobyte each).
+    private static readonly System.Reflection.PropertyInfo[] LabelFields = typeof(Label).GetProperties();
+
+    private static bool SameRumours((Box Panel, RumourLine[] Lines, IslandSummary? Island)? a, (Box Panel, RumourLine[] Lines, IslandSummary? Island)? b)
+    {
+        if (a is null || b is null)
+            return a is null && b is null;
+        var (x, y) = (a.Value, b.Value);
+        return x.Panel == y.Panel && x.Lines.AsSpan().SequenceEqual(y.Lines) && SameIsland(x.Island, y.Island);
+    }
+
+    private static bool SameIsland(IslandSummary? a, IslandSummary? b)
+    {
+        if (a is null || b is null)
+            return a is null && b is null;
+        return a.Tier == b.Tier && a.Rolls == b.Rolls && a.Rumours == b.Rumours && a.Complete == b.Complete && a.ProbablyComplete == b.ProbablyComplete
+            && a.Rotated.AsSpan().SequenceEqual(b.Rotated) && a.New.AsSpan().SequenceEqual(b.New);
+    }
+}
 
 // The overlay's control for every window: key, automatic scan, glance (still there?) every
 // 50 ms, follow (changed?) every second, foreground changes, diagnosis. Inputs are queued and
@@ -32,6 +98,13 @@ public sealed class OverlayEngine : IDisposable
     // Only touched on the control's thread.
     private IOpenWindow? open;
     private Label[] lastLabels = [];
+    private Label[] lastMarks = [];
+    // Where the game was on the screen when it was last captured: the strip alone stands there.
+    private (Box Screen, double Scale)? standingScreen;
+    // The mouse as the last picture saw it, and the game's language: for the tile of the rune
+    // chain under the mouse and its caption.
+    private (int X, int Y)? pointer;
+    private string language = GameLanguage.English;
     private (Box Panel, RumourLine[] Lines, IslandSummary? Island)? lastRumours;
     private Picture? lastPicture;
     private Box? lastScreen;
@@ -53,9 +126,11 @@ public sealed class OverlayEngine : IDisposable
     public event Action<StatusMessage>? Status;
     public event Action<string?>? Diagnosed;
 
-    public OverlayEngine(GameWindows windows, IGameScreen screen, IPrices prices, Func<RumourBook> rumours, Settings settings, TimeProvider time, Action<string> log)
+    public OverlayEngine(GameWindows windows, IGameScreen screen, IPrices prices, Func<RumourBook> rumours, Settings settings, TimeProvider time, Action<string> log, RuneChain? chain = null, ExplosivesReader? explosives = null)
     {
         this.windows = windows;
+        this.chain = chain;
+        this.explosives = explosives;
         this.screen = screen;
         this.prices = prices;
         this.rumours = rumours;
@@ -93,6 +168,7 @@ public sealed class OverlayEngine : IDisposable
                 // the checks started below read anew.
                 generation++;
                 lastLabels = [];
+                lastMarks = [];
                 if (visible && lastScreen is { } b)
                     Show(new Scene(b, [], lastRumours, lastScale));
             }
@@ -102,6 +178,111 @@ public sealed class OverlayEngine : IDisposable
         });
 
     public void RumoursChanged() => Enqueue(RebindAsync);
+
+    // The rune classes changed in the settings window: the marks of an open remnant list follow.
+    public void RunesChanged() => Enqueue(RebindAsync);
+
+    // The rune chain changed (a bar read, a new map, the reset button): the strip and the
+    // badges in the list follow.
+    public void ChainChanged() => Enqueue(ChainChangedAsync);
+
+    private readonly RuneChain? chain;
+
+    private async Task ChainChangedAsync()
+    {
+        if (open is not null)
+        {
+            await RebindAsync();
+            return;
+        }
+        if (!busy)
+            Stand();
+    }
+
+    // The strip at the top of the screen: the runes the chain carries, in the order they were
+    // chosen, each in its class colour.
+    // With the mouse on a tile, that rune's name and effect in the game's words. Null while the
+    // chain is empty — then nothing of it is drawn. width: the reference picture's width, for
+    // where the tiles are; null: no mouse looked up.
+    private RuneStrip? Standing(double? width = null)
+    {
+        if (chain is null || chain.InHaven || RuneStrip.Of(chain.Rows, n => Texts.Get("OverlayRuneChain", n)) is not { } made)
+            return null;
+        var (strip, runes) = made;
+        if (width is not { } w || strip.TileAt(pointer, w) is not { } hover)
+            return strip;
+        var rune = runes[hover.Row][hover.Index];
+        return strip with { Hover = hover, Caption = $"{rune.Name(language)}  ·  {rune.Effect(language)}" };
+    }
+
+    // The game's explosives counter (ExplosivesReader), read on the automatic scan's turns
+    // that find no window (an open list hides the HUD anyway), at most once in
+    // Tuning.Explosives.Every: all placed closes the open expedition's chain
+    // (RuneChain.Complete). Not in a logbook: the map is one expedition there. Off the
+    // control's thread, inside the scan's capture.
+    private readonly ExplosivesReader? explosives;
+    private DateTimeOffset gaugeNotBefore = DateTimeOffset.MinValue;
+    private ExplosivesReading? gauged;
+    private (string Area, long Seed)? unreadIn;
+
+    private async Task GaugeAsync(GameCapture.Frame frame)
+    {
+        if (explosives is null || chain is null || !chain.Tracked || chain.InHaven || chain.InLogbook || !settings.AutoRemnant)
+            return;
+        var now = time.GetUtcNow();
+        if (now < gaugeNotBefore)
+            return;
+        gaugeNotBefore = now + Tuning.Explosives.Every;
+        var reading = explosives.Read(frame);
+        if (reading is null)
+            return;
+        bool changed = !reading.Equals(gauged);
+        gauged = reading;
+        if (reading is ExplosivesUnread u)
+        {
+            // No digit pictures for this window height: told once per map, and the counter is
+            // not read again before UnreadEvery.
+            if (unreadIn != chain.Instance)
+                log($"Rune chain: the explosives counter was found but not understood ({u})");
+            unreadIn = chain.Instance;
+            gaugeNotBefore = now + Tuning.Explosives.UnreadEvery;
+            return;
+        }
+        // Complete is asked whenever all are placed, not only on a change: the same reading
+        // ("5/5") at the next expedition's site must close that one too.
+        if (reading.AllPlaced && chain.Complete())
+            log($"Rune chain: explosives {reading}, the expedition's chain is complete; the next remnant starts a new one");
+        else if (changed)
+            log($"Rune chain: explosives {reading}");
+    }
+
+    // The mouse moved: the rune chain's caption may come or go. Draws only when the scene
+    // differs from the one drawn (Show).
+    private void Pointed(GameCapture.Frame frame)
+    {
+        // Every glance ends here: nothing to do while the mouse rests (review 05.11.2026).
+        if (frame.Pointer == pointer && frame.Language == language)
+            return;
+        pointer = frame.Pointer;
+        language = frame.Language;
+        if (Standing() is null)
+            return;
+        if (open is not null && visible && lastScreen is { } b)
+            Show(new Scene(b, lastLabels, lastRumours, lastScale, lastMarks));
+        else if (open is null)
+            Stand();
+    }
+
+    // With no window open: the strip alone when the chain has links and the game is in front,
+    // else nothing. The strip comes and goes with the automatic scan's turns (ShowAsync).
+    private void Stand()
+    {
+        bool standing = Standing() is not null && !hiddenByKey && screen.InFront;
+        if (standing && standingScreen is { } s)
+            Show(new Scene(s.Screen, [], null, s.Scale));
+        else if (!standing && visible && open is null)
+            HideOverlay();
+    }
 
     public void Diagnose(string folder) => Enqueue(() => DiagnoseAsync(folder));
 
@@ -170,13 +351,45 @@ public sealed class OverlayEngine : IDisposable
 
     // Keep only when pictures are kept: a window with a Keep clones its picture for it
     // (FavoursGameWindow, the first look), which is pure cost otherwise (review 19.10.).
-    private LookContext Context() => new(rumours(), settings, log, KeepsEvidence ? Keep : null);
+    private LookContext Context() => new(rumours(), settings, log, KeepsEvidence ? Keep : null, Clock: time, Escaped: LastEscape, Confirmed: LastConfirm, EscapeReadable: EscapeReadable, GamepadReadable: GamepadReadable());
+
+    // The last cancel — Esc through the keyboard hook, the gamepad's cancel button through
+    // GamepadWatch, Windows.Gaming.Input — and the last confirm (the gamepad's confirm button;
+    // a mouse click is not read) seen while the game was in front (UTC ticks; long.MinValue:
+    // none yet). The remnant list closes on a cancel without a choice, on a click or the
+    // confirm button with one (RemnantGameWindow.Closed). Called from the hook's or the
+    // watch's thread; logged only while a remnant list is open — both buttons do other things
+    // in the game (05.11.2026: Circle is the dodge roll, up to fifty presses a minute).
+    // EscapeReadable: the hook works (false when Windows refused it); GamepadReadable: a pad
+    // answered lately.
+    public bool EscapeReadable { get; set; } = true;
+    public Func<bool> GamepadReadable { get; set; } = () => false;
+    private long escaped = long.MinValue;
+    private long confirmed = long.MinValue;
+    public void Escaped(string what = "Esc") => Pressed(ref escaped, what);
+    public void Confirmed(string what = "the confirm button") => Pressed(ref confirmed, what);
+    private void Pressed(ref long last, string what)
+    {
+        Interlocked.Exchange(ref last, time.GetUtcNow().UtcTicks);
+        // The reference alone, from another thread: a stale window costs a log line at most.
+        // The line is written off this thread: Esc comes through the low-level keyboard hook,
+        // whose callback must return at once (Windows drops a slow hook without a word).
+        if (Volatile.Read(ref open)?.Window is RemnantGameWindow)
+            ThreadPool.QueueUserWorkItem(_ => log($"Remnant list: {what} pressed"));
+    }
+    private DateTimeOffset? LastEscape() => Last(ref escaped);
+    private DateTimeOffset? LastConfirm() => Last(ref confirmed);
+    private static DateTimeOffset? Last(ref long field)
+    {
+        long ticks = Interlocked.Read(ref field);
+        return ticks == long.MinValue ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+    }
 
     // Where the pictures go that a window hands over as evidence (LookContext.Keep). Kept
     // only with Settings.ExtendedDiagnostics on — a user's program writes nothing by itself
     // (19.10.2026); the switch is judged here, from the settings the engine holds.
     public string? EvidenceFolder { get; set; }
-    private bool KeepsEvidence => EvidenceFolder is not null && settings.ExtendedDiagnostics;
+    private bool KeepsEvidence => EvidenceFolder is not null && settings.ExtendedDiagnostics && screen.PicturesFromWindow;
 
     // Called from the thread that reads the picture: copied there, written beside it. A
     // picture that cannot be written is logged and nothing else. Of each kind only the newest
@@ -363,6 +576,8 @@ public sealed class OverlayEngine : IDisposable
                 try
                 {
                     var seen = captured is null ? null : await windows.LookAsync(captured, context, wanted);
+                    if (seen is null && captured is not null && quiet)
+                        await GaugeAsync(captured);
                     // Not the look of the automatic scan that finds nothing: it comes twice a
                     // second while the game is in front and would fill the log.
                     if (!quiet || seen is not null)
@@ -376,8 +591,16 @@ public sealed class OverlayEngine : IDisposable
                 }
             });
             showStarted = total;
+            if (frame is not null)
+            {
+                standingScreen = (frame.ScreenBounds, frame.Scale);
+                pointer = frame.Pointer;
+                language = frame.Language;
+            }
             if (frame is null || found is null)
             {
+                if (quiet && frame is not null && started == generation)
+                    Stand();
                 frame?.Dispose();
                 if (!quiet)
                     Status?.Invoke(new(Texts.Get(frame is null ? "GameNotFound" : "NoWindowDetected")));
@@ -434,6 +657,7 @@ public sealed class OverlayEngine : IDisposable
         open = picture.Next;
         lastPicture = picture;
         lastLabels = picture.Labels;
+        lastMarks = picture.Marks ?? [];
         lastRumours = picture.Rumours;
         lastScreen = frame.ScreenBounds;
         lastScale = frame.Scale;
@@ -441,7 +665,7 @@ public sealed class OverlayEngine : IDisposable
         lastFrame = frame;
         if (!screen.InFront)
             return;
-        Show(new Scene(frame.ScreenBounds, picture.Labels, picture.Rumours, frame.Scale));
+        Show(new Scene(frame.ScreenBounds, picture.Labels, picture.Rumours, frame.Scale, lastMarks));
         if (showStarted is { } t)
         {
             log($"Time: hotkey to overlay {t.ElapsedMilliseconds} ms");
@@ -451,7 +675,7 @@ public sealed class OverlayEngine : IDisposable
         Status?.Invoke(new(picture.Status));
     }
 
-    // Every Profile.Follow: still there, changed (read again) or kept; labels drawn anew.
+    // Every GameWindows.FollowEvery: still there, changed (read again) or kept; labels drawn anew.
     private async Task FollowAsync()
     {
         if (busy || open is null)
@@ -482,12 +706,14 @@ public sealed class OverlayEngine : IDisposable
     {
         var window = open!;
         var context = Context();
-        var (frame, next) = await Task.Run(async () =>
+        var (frame, next, captureMs) = await Task.Run(async () =>
         {
-            var captured = screen.Capture();
+            var watch = Stopwatch.StartNew();
+            var captured = screen.Read(window.FollowArea);
+            long took = watch.ElapsedMilliseconds;
             try
             {
-                return captured is null ? (captured, (IOpenWindow?)null) : (captured, await window.FollowAsync(captured, context));
+                return captured is null ? (captured, (IOpenWindow?)null, took) : (captured, await window.FollowAsync(captured, context), took);
             }
             catch
             {
@@ -495,6 +721,7 @@ public sealed class OverlayEngine : IDisposable
                 throw;
             }
         });
+        ReportFollow(captureMs, window);
         if (started != generation)
         {
             frame?.Dispose();
@@ -546,7 +773,7 @@ public sealed class OverlayEngine : IDisposable
                 capture = watch.ElapsedMilliseconds;
                 try
                 {
-                    var glanced = captured is null ? Glance.Unchanged : window.Glance(captured.Image, ready, context);
+                    var glanced = captured is null ? Glance.Unchanged : window.Glance(captured, ready, context);
                     check = watch.ElapsedMilliseconds - capture;
                     return (captured, glanced);
                 }
@@ -577,8 +804,11 @@ public sealed class OverlayEngine : IDisposable
                     // are lost within a second of being shown and found again a moment later
                     // (log of 22./23.10.2026: 41 stash losses within 0.2 s of a show), while
                     // every stored picture glances as it looks; what the live picture holds at
-                    // that moment is not known.
-                    Keep("glance-gone-" + Slug(window.Window.Profile.Name), frame.Image);
+                    // that moment is not known. Not for the remnant list: closing it is the
+                    // normal way it goes (73 times in one session of 01.11.2026, each picture
+                    // showed it closed), and the losses the picture was kept for are explained.
+                    if (window.Window is not RemnantGameWindow)
+                        Keep("glance-gone-" + Slug(window.Window.Profile.Name), frame.Image);
                     frame.Dispose();
                     log($"Time: quick check capture {capture} ms, check {check} ms");
                     log("hidden (quick check): " + gone.Why);
@@ -592,6 +822,7 @@ public sealed class OverlayEngine : IDisposable
                     {
                         generation++; // a follow still running read the old window
                         lastLabels = [];
+                        lastMarks = [];
                         lastRumours = null;
                         if (lastScreen is { } b)
                             Show(new Scene(b, [], null, lastScale));
@@ -611,13 +842,15 @@ public sealed class OverlayEngine : IDisposable
                         open = picture.Next;
                         lastPicture = picture;
                         lastLabels = picture.Labels;
+                        lastMarks = picture.Marks ?? [];
                         lastRumours = picture.Rumours;
                         lastScreen = frame.ScreenBounds;
                         lastScale = frame.Scale;
-                        Show(new Scene(frame.ScreenBounds, picture.Labels, picture.Rumours, frame.Scale));
+                        Show(new Scene(frame.ScreenBounds, picture.Labels, picture.Rumours, frame.Scale, lastMarks));
                     }
                     break;
                 default:
+                    Pointed(frame);
                     frame.Dispose();
                     break;
             }
@@ -632,7 +865,12 @@ public sealed class OverlayEngine : IDisposable
     private void OnForeground()
     {
         if (open is null)
+        {
+            // The strip alone: it goes with the game; the automatic scan brings it back.
+            if (!screen.InFront && visible)
+                HideOverlay();
             return;
+        }
         if (!screen.InFront)
         {
             if (visible)
@@ -641,12 +879,13 @@ public sealed class OverlayEngine : IDisposable
         }
         else if (!visible && lastScreen is { } b)
         {
-            Show(new Scene(b, lastLabels, lastRumours, lastScale));
+            Show(new Scene(b, lastLabels, lastRumours, lastScale, lastMarks));
             log("shown again: game in foreground");
         }
     }
 
-    // Own ratings changed in the settings window: shown at once.
+    // Own ratings, rune classes or the rune chain changed in the window: the open window is
+    // labelled anew from the frame it was last read on, and shown at once.
     private async Task RebindAsync()
     {
         if (busy)
@@ -661,16 +900,20 @@ public sealed class OverlayEngine : IDisposable
             return;
         open = next;
         var picture = await next.LabelAsync(lastFrame, prices.GetAsync(), Context());
+        open = picture.Next;
+        lastPicture = picture;
+        lastLabels = picture.Labels;
+        lastMarks = picture.Marks ?? [];
         lastRumours = picture.Rumours;
         if (visible && lastScreen is { } b)
-            Show(new Scene(b, lastLabels, lastRumours, lastScale));
+            Show(new Scene(b, lastLabels, lastRumours, lastScale, lastMarks));
     }
 
     // Diagnosis key: the screen, what was shown, and what each window reads on it now. Only
     // with the game itself in front: this is the one picture that is saved.
     private async Task DiagnoseAsync(string folder)
     {
-        if (!screen.GameInFront)
+        if (!screen.InFront)
         {
             log("diagnostics not saved: game not in foreground");
             Status?.Invoke(new(Texts.Get("DiagnosticsNeedForeground")));
@@ -691,7 +934,13 @@ public sealed class OverlayEngine : IDisposable
             using var frame = GameCapture.Stored(shot.Picture, shot.Pointer, null, shot.Popup, shot.Language);
             Directory.CreateDirectory(folder);
             var name = Path.Combine(folder, DateTime.Now.ToString("yyyy-MM-dd_HHmmss"));
-            Cv2.ImWrite(name + ".png", shot.Picture);
+            // From the screen, the picture could hold other windows over the game (a video, a
+            // chat): then only the JSON is kept, and the status says so (IGameScreen.PicturesFromWindow).
+            bool picture = screen.PicturesFromWindow;
+            if (picture)
+                Cv2.ImWrite(name + ".png", shot.Picture);
+            else
+                log("diagnostics: picture not saved (read from the screen, could show other windows)");
             var fresh = new List<object>();
             foreach (var window in windows.All)
             {
@@ -710,15 +959,16 @@ public sealed class OverlayEngine : IDisposable
             JsonFiles.Write(name + ".json", new { Settings = told, Pointer = shot.Pointer is { } p ? new[] { p.X, p.Y } : null, frame.Scale, frame.Popup, GameLanguage = shot.Language, shot.TextSize, Shown = shown?.Description, ShownLabels = labels, Fresh = fresh });
             return name;
         });
+        if (file is not null && !screen.PicturesFromWindow)
+            Status?.Invoke(new(Texts.Get("DiagnosticsNoPictureScreen")));
         Diagnosed?.Invoke(file);
     }
 
     private void StartChecks()
     {
-        var profile = open!.Window.Profile;
-        follow.Change(profile.Follow, profile.Follow);
+        follow.Change(GameWindows.FollowEvery, GameWindows.FollowEvery);
         // Not faster than a glance takes, not slower than the follow, which hides as well.
-        glanceEvery = TimeSpan.FromSeconds(Math.Clamp(settings.GlanceIntervalSeconds, GameWindows.GlanceEvery.TotalSeconds, profile.Follow.TotalSeconds));
+        glanceEvery = TimeSpan.FromSeconds(Math.Clamp(settings.GlanceIntervalSeconds, GameWindows.GlanceEvery.TotalSeconds, GameWindows.FollowEvery.TotalSeconds));
         glancePace = glanceEvery;
         glanceCaptures.Clear();
         glance.Change(glanceEvery, glanceEvery);
@@ -735,18 +985,51 @@ public sealed class OverlayEngine : IDisposable
     private TimeSpan glanceEvery = GameWindows.GlanceEvery,
         glancePace = GameWindows.GlanceEvery;
     private readonly CaptureTimes glanceCaptures = new(Tuning.Control.GlanceCaptureWindow);
+    // The last DiagnosticsEvery captures for the line with extended diagnostics (Report).
+    private readonly CaptureTimes glanceReport = new(Tuning.Control.DiagnosticsEvery);
 
     private void PaceGlance(long captureMs, IOpenWindow window)
     {
         glanceCaptures.Add(captureMs);
+        Report(captureMs);
         double usual = glanceCaptures.Median;
-        var wanted = Paced(glancePace, usual / Tuning.Control.GlanceLoad, glanceEvery, Tuning.Control.GlancePaceStep, window.Window.Profile.Follow);
+        var wanted = Paced(glancePace, usual / Tuning.Control.GlanceLoad, glanceEvery, Tuning.Control.GlancePaceStep, GameWindows.FollowEvery);
         if (wanted == glancePace)
             return;
         glancePace = wanted;
         glance.Change(wanted, wanted);
         log($"glance every {wanted.TotalMilliseconds:0} ms: its capture takes {usual:0} ms (median of {glanceCaptures.Count})");
     }
+
+    // One line per DiagnosticsEvery follows with extended diagnostics on: the median and the
+    // slowest capture (IGameScreen.Read of the window's FollowArea) and the last window with
+    // its area — against the whole picture's time in the "Time: capture" lines of the key and
+    // the automatic scan (OFFEN Z11: 174–280 ms at 3840×2160 on 31.10.2026).
+    private readonly CaptureTimes followReport = new(Tuning.Control.DiagnosticsEvery);
+
+    private void ReportFollow(long captureMs, IOpenWindow window) =>
+        Sample(followReport, captureMs, () => $"follow: {followReport.Count} captures, median {followReport.Median:0} ms, max {followReport.Max:0} ms, last {window.Window.Profile.Name} {(window.FollowArea is { } a ? $"{a.Width}x{a.Height}" : "whole")}");
+
+    // The capture times of the follows and the glances, counted whatever the switch and written
+    // every DiagnosticsEvery only with it (the overlay's line, CompositionOverlay.Measured, counts
+    // only with the switch: it has no engine to count for).
+    private void Sample(CaptureTimes into, long ms, Func<string> line)
+    {
+        into.Add(ms);
+        if (into.Count < Tuning.Control.DiagnosticsEvery)
+            return;
+        if (settings.ExtendedDiagnostics)
+            log(line());
+        into.Clear();
+    }
+
+    // One line per DiagnosticsEvery glances with extended diagnostics on: the median and the
+    // slowest capture among them and the pace they set. The pace line above comes only when
+    // the pace changes, which it does not while the captures stay slow — the time the glance
+    // takes beside the overlay's drawing and the readers (OFFEN Z11) is otherwise not in the
+    // log. Counted whatever the switch, written only with it.
+    private void Report(long captureMs) =>
+        Sample(glanceReport, captureMs, () => $"glance: {glanceReport.Count} captures, median {glanceReport.Median:0} ms, max {glanceReport.Max:0} ms, pace {glancePace.TotalMilliseconds:0} ms");
 
     // The last few capture times and their median: a single slow capture among usual ones
     // does not count, a run of them does. Only touched on the control's thread.
@@ -765,6 +1048,8 @@ public sealed class OverlayEngine : IDisposable
         }
 
         public void Clear() => (next, Count) = (0, 0);
+
+        public double Max => Count == 0 ? 0 : times[..Count].Max();
 
         // Of an even count the lower middle: the pace goes up on a slow capture one short of
         // half, not on half.
@@ -810,21 +1095,40 @@ public sealed class OverlayEngine : IDisposable
         exactAsked = false;
         follow.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         glance.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-        HideOverlay();
+        // The strip stays when the chain has links: the window goes, the chain does not.
+        if (Standing() is not null && !hiddenByKey && screen.InFront && standingScreen is { } s)
+            Show(new Scene(s.Screen, [], null, s.Scale));
+        else
+            HideOverlay();
         open = null;
         // Nothing of this window may come back with a foreground change while the next one is
         // still being labelled (code review).
         lastScreen = null;
         lastLabels = [];
+        lastMarks = [];
         lastRumours = null;
         // A diagnosis after this must not report the window shown last: over a stash tab the
         // program does not know (20.10.), it told "Orbs 1.00" from the tab before.
         lastPicture = null;
     }
 
+    // The scene as drawn last and when, null while nothing is drawn: a follow or glance that
+    // ends in the same picture draws nothing (Scene.SameAs) — except once every
+    // Tuning.Control.RedrawEvery, in case the window's picture was lost (review 31.10.2026).
+    private Scene? drawn;
+    private DateTimeOffset drawnAt;
+
     private void Show(Scene scene)
     {
+        scene = scene with { Strip = Standing(scene.Screen.Width / scene.Scale) };
         visible = true;
+        var now = time.GetUtcNow();
+        if (drawn is not null && drawn.SameAs(scene) && now - drawnAt < Tuning.Control.RedrawEvery)
+            return;
+        if (drawn is not null && settings.ExtendedDiagnostics)
+            log("Overlay: drawn anew, " + (drawn.SameAs(scene) ? "the same picture after RedrawEvery" : drawn.Differs(scene)));
+        drawn = scene;
+        drawnAt = now;
         Draw?.Invoke(scene);
     }
 
@@ -850,6 +1154,7 @@ public sealed class OverlayEngine : IDisposable
     private void HideOverlay()
     {
         visible = false;
+        drawn = null;
         Draw?.Invoke(null);
     }
 

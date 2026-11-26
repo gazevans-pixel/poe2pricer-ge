@@ -9,7 +9,7 @@ public sealed class RumourGameWindow(Pipeline pipeline) : IGameWindow
 {
     internal Pipeline Pipeline { get; } = pipeline;
 
-    public WindowProfile Profile { get; } = new("Rumours", AutoSwitch.Expedition, GameWindows.FollowEvery);
+    public WindowProfile Profile { get; } = new("Rumours", AutoSwitch.Rumours);
 
     public bool IsThere(GameCapture.Frame frame) => Pipeline.Rumours.Locate(frame.Image, popup: frame.Popup) is not null;
 
@@ -59,7 +59,45 @@ public sealed class RumourGameWindow(Pipeline pipeline) : IGameWindow
         var island = Islands.Place(print, lines.Select(l => l.Entry?.Name).ToArray(), opened, previous);
         var all = Islands.All;
         context.Log($"Rumour window at island {IndexOf(all, island)} of {all.Count}, roll {island.Rolls}, {island.Seen.Count} rumours seen, {print.Points.Length} chart points");
+        Split(image, print, island, context);
         return island;
+    }
+
+    // Where the panel was placed last, for Split.
+    private Island? lastPlaced;
+    private DateTimeOffset lastPlacedAt;
+
+    // Two readings 0.4–0.6 s apart were placed at different islands (24.10. and 31.10.2026,
+    // OFFEN F9): one of them wrongly, and the log alone does not tell which — the new island
+    // may be the old one seen with the chart moved, or the old one may have swallowed a new
+    // one. Until a case is on record nothing is changed. The record, with extended
+    // diagnostics on: when the panel is placed at another island than the one placed
+    // Tuning.Islands.SplitWithin before, the picture is kept with both prints drawn — this
+    // reading green (its marker ringed white, its points), the island before red, its points
+    // laid at this marker so that a moved chart shows as an offset, the strips that are not
+    // read grey — and the log names how alike the two prints are.
+    private void Split(Mat image, IslandPrint print, Island island, LookContext context)
+    {
+        var before = lastPlaced;
+        var at = lastPlacedAt;
+        var now = context.Now;
+        lastPlaced = island;
+        lastPlacedAt = now;
+        if (before is null || before == island || now - at > Tuning.Islands.SplitWithin)
+            return;
+        var (score, evidence, scale) = IslandMarks.Match(print, before.Print);
+        context.Log($"Rumour window: placed at another island {(now - at).TotalMilliseconds:0} ms after the last placing ({score:0.00} alike over {evidence} points at scale {scale:0.00}); evidence kept with extended diagnostics");
+        if (context.Keep is not { } keep)
+            return;
+        using var canvas = image.Clone();
+        foreach (var box in print.Hidden)
+            Cv2.Rectangle(canvas, new Rect(box.X, box.Y, box.Width, box.Height), new Scalar(128, 128, 128), 2);
+        foreach (var p in before.Print.Points)
+            Cv2.Circle(canvas, new Point((int)Math.Round(print.Marker.X + p.X), (int)Math.Round(print.Marker.Y + p.Y)), 5, new Scalar(0, 0, 255), 1);
+        foreach (var p in print.Points)
+            Cv2.Circle(canvas, new Point((int)Math.Round(print.Marker.X + p.X), (int)Math.Round(print.Marker.Y + p.Y)), 3, new Scalar(0, 255, 0), -1);
+        Cv2.Circle(canvas, print.Marker, 14, new Scalar(255, 255, 255), 2);
+        keep("island-split", canvas);
     }
 
     private static int IndexOf(IReadOnlyList<Island> all, Island island)

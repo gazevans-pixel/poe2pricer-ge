@@ -3,22 +3,69 @@
 All notable changes to poe2pricer, newest first. The release notes on GitHub say the same
 with more words: https://github.com/saxe78/poe2pricer/releases
 
-## Unreleased (gazevans-pixel fork)
+## 1.5.1 — 2026-11-08
+
+Built and tested against Path of Exile 2 0.5.5f.
+
+### Fixed
+- Waystones and tablets are priced only while the inventory panel is on screen: loot on
+  the ground gets no price any more, nor does an unidentified item.
+- A waystone or tablet in the inventory beside an open stash tab is priced while the stash
+  prices stand.
+- Rune chain: a map with several expeditions gets a row per expedition; a row closes when
+  the explosives counter says all are placed.
+- Remnant list: crowns are read right beside an inscription tile, behind an item's picture,
+  on the Earth rune and under the game's "Item Filter loaded" message.
+- Ritual with a controller: an omen of a look-alike group under the cursor gets its price
+  instead of "!".
+- Reading the game window: after a client restart or a long loading screen the game window
+  is read again instead of the screen for the rest of the run.
+- Outside the game the empty overlay no longer keeps the auto-hide taskbar down.
 
 ### Added
-- Rune chain for Grand Expeditions, off by default: Settings → automatic scan, "Rune
-  chain", beside the Expedition switch. A rune in a crowned slot of a Runic Remnant goes on to
-  every later pack of the explosive chain, and the game counts each rune once. From the first
-  remnant list opened in an area until the area is left, a panel at the top of the screen
-  shows all 33 runes (shipped in `data/runes`, named; only these are known): gold and purple
-  first and larger, blue and white below, the ones this map's chain carries in colour, the rest grey.
-  A rune that just joined the chain is framed white for a few seconds; a rune clearly one of
-  the set joins at the first look, one only probably so when two looks in a row agree, and a
-  reading near none of them is passed over.
-  In the remnant list a row whose crowned rune is carried already gets a red frame and ✗ on
-  that rune. The chain is cleared when the game's log (logs/Client.txt) shows another area
-  (the hideout, the next map), or with `Alt+Shift+R` (settings.json: RuneResetKey,
-  GameLogFile). Keyboard UI only so far.
+- The log names the game's version; the status line says so when it is not the one this
+  release was tested with.
+- Extended diagnostics keep a picture of a rumour panel placed at another island within
+  seconds, and of a remnant list with an unreadable row or crown.
+
+## 1.5.0 — 2026-11-05
+
+Built and tested against Path of Exile 2 0.5.5e.
+
+### Added
+- Remnant list: a coloured dot marks the rune each row passes on to the later packs of the
+  explosive chain. Which colour a rune gets is yours to set in the new Runes tab.
+- Rune chain: the runes your chosen remnants pass on stand at the top of the screen while you
+  are in the map, and a rune the chain already carries gets a ✗ in the list. To tell a choice
+  from a cancel, the program notes Esc and, with a controller, the confirm and cancel buttons
+  while a list is open.
+- Settings: "Expedition" is now two switches, Rumours and Remnant.
+
+### Fixed
+- Remnant list with keyboard and mouse: the eleventh row never got a price.
+- Remnant list: the game's own rune tooltip inside the list made the prices jump.
+- Rumours: Barren Atoll and Bleached Shoals showed each other's mods and ratings.
+- Settings window: switching the language to Russian cut off some labels.
+
+## 1.4.1 — 2026-11-01
+
+Built and tested against Path of Exile 2 0.5.5e.
+
+### Fixed
+- Prices are drawn only while the game itself is the foreground window. Before, with a video
+  over the game and the settings window brought up with Alt+Tab, prices could appear over the
+  video.
+- Ritual window with a controller: the price of the item under the cursor no longer vanishes
+  while the cursor rests on it.
+
+### Changed
+- The item catalogue is rebuilt from current sources: 271 more items get a price, among them
+  infusers, orbs of sacrifice, reliquary keys, crisis fragments, fluxes and idols.
+- Less work per picture at high resolutions; the overlay redraws only when something changed.
+- Diagnosis pictures are saved only when they come from the game window itself, never from a
+  screen read that could show other windows. The evidence picture of a closed remnant list is
+  no longer kept.
+- Rumour card: rumours the panel does not show keep the colour of their rating.
 
 ## 1.4.0 — 2026-10-29
 

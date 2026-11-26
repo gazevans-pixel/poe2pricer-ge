@@ -7,7 +7,7 @@ namespace Poe2Pricer.Core.Tablets;
 // What a tablet's tooltip says, read from its OCR lines: the name and kind from the title,
 // the uses left and the item level (Alt held) from the head block, the mods matched against
 // the kind's list. Unread: lines between the head and the flavour text that matched nothing.
-public sealed record TabletReading(string Name, TabletKind Kind, int? Uses, int? ItemLevel, IReadOnlyList<TabletModReading> Mods, IReadOnlyList<string> Unread, bool Ended = true)
+public sealed record TabletReading(string Name, TabletKind Kind, int? Uses, int? ItemLevel, IReadOnlyList<TabletModReading> Mods, IReadOnlyList<string> Unread, bool Ended = true, bool Unidentified = false)
 {
     // Something of the tooltip was understood (WaystoneReading.Understood): the uses, a mod,
     // or the closing line.
@@ -21,7 +21,7 @@ public sealed record TabletReading(string Name, TabletKind Kind, int? Uses, int?
     public TabletReading Merge(TabletReading later)
     {
         var mods = ModRows.Merged(Mods, later.Mods, m => m.Mod.Text, m => m.Value is not null);
-        return this with { Uses = Uses ?? later.Uses, ItemLevel = ItemLevel ?? later.ItemLevel, Mods = mods, Unread = later.Unread, Ended = Ended || later.Ended };
+        return this with { Uses = Uses ?? later.Uses, ItemLevel = ItemLevel ?? later.ItemLevel, Mods = mods, Unread = later.Unread, Ended = Ended || later.Ended, Unidentified = Unidentified || later.Unidentified };
     }
 }
 
@@ -57,7 +57,7 @@ public static partial class TabletTooltip
         int? uses = null, itemLevel = null;
         var mods = new List<TabletModReading>();
         var unread = new List<string>();
-        bool ended = false;
+        bool ended = false, unidentified = false;
         string implicitKey = WaystoneMods.KeyOf(kind.Implicit[0]), implicitKeyDe = WaystoneMods.KeyOf((kind.ImplicitDe ?? kind.Implicit)[0]);
         bool afterImplicit = false;
         foreach (var raw in lines.Skip(title + 1))
@@ -75,6 +75,12 @@ public static partial class TabletTooltip
                 continue;
             }
             afterImplicit = false;
+            // "Unidentified" (WaystoneReading.Unidentified): not asked for.
+            if (WaystoneTooltip.IsUnidentified(key))
+            {
+                unidentified = true;
+                continue;
+            }
             if (key.StartsWith("canbeusedinapersonalmapdevice") || key.StartsWith("modifierstoamap")
                 || key.StartsWith("kannineinem") || key.StartsWith("werdenumeinerkarte"))
             {
@@ -114,7 +120,7 @@ public static partial class TabletTooltip
             else
                 unread.Add(line);
         }
-        return new(name, kind, uses, itemLevel, mods, unread, ended);
+        return new(name, kind, uses, itemLevel, mods, unread, ended, unidentified);
     }
 
     private static bool Near(string key, string expected) =>

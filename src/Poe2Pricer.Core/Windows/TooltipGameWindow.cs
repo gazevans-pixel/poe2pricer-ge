@@ -12,8 +12,12 @@ namespace Poe2Pricer.Core;
 // site (ITradePrices) in the vocabulary of a profile (WaystoneProfile.Choose,
 // TabletSettings.For), or as itself without one. The price stands at the right end of the
 // title bar.
-// The special stash tabs come before this window in GameWindows.Standard: a tooltip over
-// one of them is theirs.
+// The stash window comes before this one in GameWindows.Standard and, while it is open, reads
+// the tooltips through this window itself (LookAsync hosted, ITooltipHost): the tooltip of a
+// waystone in the inventory beside an open stash tab is content of the stash window, not a
+// second window — the engine shows one window at a time, and with the stash open the scan
+// never looked for a tooltip (diagnosis 08.11.2026 14:45). The inventory is open whenever the
+// stash is (the author, 08.11.2026), so the hosted look does not ask for the panel.
 public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = null) : IGameWindow
 {
     internal Pipeline Pipeline { get; } = pipeline;
@@ -26,21 +30,80 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
     private readonly Dictionary<(int X, int Y, int Width), double> rejected = [];
     private readonly Lock rejecting = new();
 
-    public WindowProfile Profile { get; } = new("Waystone", AutoSwitch.Stash, GameWindows.FollowEvery);
+    public WindowProfile Profile { get; } = new("Waystone", AutoSwitch.Stash);
 
     // Only whether a tooltip title bar stands on the frame: whether it is a waystone's or a
     // tablet's takes the OCR, which a look does and a check does not.
     public bool IsThere(GameCapture.Frame frame) => Pipeline.WaystoneTooltips(frame.Image, frame.Popup).Length > 0;
 
-    public async Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context)
+    // When a tooltip without the inventory panel was last said in the log, and how many came
+    // since unsaid: at most one line a minute. Running past loot in a map brought a tooltip
+    // at a new place every second (log 08.11.2026 15:38: twenty lines in twenty seconds), so
+    // one line per place was no limit; the line is kept for the case the panel is not
+    // recognised in some window, and one a minute with the count tells that as well.
+    private DateTimeOffset noPanelAt = DateTimeOffset.MinValue;
+    private int noPanelUnsaid;
+    private static readonly TimeSpan NoPanelEvery = TimeSpan.FromMinutes(1);
+
+    // The inventory panel as last looked for, kept PanelKept: the scan looks every half second
+    // while a tooltip stands, the search costs tens of milliseconds, and the panel does not
+    // come and go within a second.
+    private (DateTimeOffset At, InventoryWindow? Panel) panel = (DateTimeOffset.MinValue, null);
+    private static readonly TimeSpan PanelKept = TimeSpan.FromSeconds(1);
+
+    internal InventoryWindow? Panel(Mat bgr, LookContext context)
     {
-        foreach (var box in Pipeline.WaystoneTooltips(frame.Image, frame.Popup))
+        lock (rejecting)
+            if (context.Now - panel.At < PanelKept)
+                return panel.Panel;
+        var found = Pipeline.Inventory.Locate(bgr);
+        lock (rejecting)
+            panel = (context.Now, found);
+        return found;
+    }
+
+    public Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context) => LookAsync(frame, context, hosted: false);
+
+    // hosted: looked for by another window that holds the tooltip as its content (the stash);
+    // the inventory panel is on screen with it, so it is not looked for, and the tooltip's
+    // going does not hide anything.
+    internal async Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context, bool hosted)
+    {
+        // Title bars not yet put aside as no waystone's or tablet's (Rejected: a ring in the
+        // inventory costs one OCR, then nothing per scan).
+        var boxes = Pipeline.WaystoneTooltips(frame.Image, frame.Popup).Where(b => !Rejected(frame.Image, b, frame.Popup)).ToArray();
+        if (boxes.Length == 0)
+            return null;
+        // Only with the inventory panel on screen (inventory, stash, vendor, map device): the
+        // tooltip of loot on the ground, which the controller's selection shows while the player
+        // passes, is no item to price (OFFEN U23, 08.11.2026). Looked for before the OCR, the
+        // cheaper of the two. A diagnosis (Observe) reads on and records the verdict.
+        var inventory = hosted ? null : Panel(frame.Image, context);
+        if (!hosted && inventory is null && !context.Observe)
+        {
+            string? line = null;
+            lock (rejecting)
+            {
+                if (context.Now - noPanelAt >= NoPanelEvery)
+                {
+                    line = $"Tooltip at {boxes[0].X},{boxes[0].Y} without the inventory panel on screen (loot on the ground?): not shown" + (noPanelUnsaid > 0 ? $" ({noPanelUnsaid} more such since the last line, not listed)" : "");
+                    noPanelAt = context.Now;
+                    noPanelUnsaid = 0;
+                }
+                else
+                    noPanelUnsaid++;
+            }
+            if (line is not null)
+                context.Log(line);
+            return null;
+        }
+        foreach (var box in boxes)
         {
             var reading = await ReadAsync(frame.Image, box, frame.Popup);
             if (reading is null)
                 continue;
-            context.Log($"{reading.What} tooltip at {box.X},{box.Y}: {reading.Title}, {reading.ModCount} mods" + (reading.UnreadCount > 0 ? $", {reading.UnreadCount} lines unread" : ""));
-            return new Open(this, box, reading, frame.Popup, null, Look: TitleLook(frame.Image, box, frame.Popup));
+            context.Log($"{reading.What} tooltip at {box.X},{box.Y}: {reading.Title}, {reading.ModCount} mods" + (reading.Unidentified ? ", unidentified" : "") + (reading.UnreadCount > 0 ? $", {reading.UnreadCount} lines unread" : "") + (hosted ? ", with the stash" : inventory is null ? ", no inventory panel" : ""));
+            return new Open(this, box, reading, frame.Popup, null, Look: TitleLook(frame.Image, box, frame.Popup), Inventory: inventory, Hosted: hosted);
         }
         return null;
     }
@@ -53,6 +116,7 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
         public int ModCount => Waystone?.Mods.Count ?? Tablet!.Mods.Count;
         public int UnreadCount => Waystone?.Unread.Count ?? Tablet!.Unread.Count;
         public bool Understood => Waystone?.Understood ?? Tablet!.Understood;
+        public bool Unidentified => Waystone?.Unidentified ?? Tablet!.Unidentified;
 
         // The same item as before (name and kind): a later reading adds to this one.
         // The name as the OCR reads it may differ by a letter from one picture to the next (a
@@ -83,6 +147,21 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
     // 21.10.2026). The binarised reading leads, each later one fills the gaps of the ones
     // before (Merge); on its own, the undimmed one loses lines in a few pictures (measured
     // 22.10.2026 on 30: 8 better, 4 worse — as the third, 12 better, none worse).
+    // Whether this title bar was read before and found to be no waystone's or tablet's (the
+    // same place and the same look of its title row, see ReadAsync).
+    private bool Rejected(Mat bgr, Box box, double popup)
+    {
+        int width = Math.Min(box.Width, Px(Tune.MaxWidth, popup));
+        var titleArea = new Rect(box.X, box.Y, width, Px(Tuning.Titles.TwoLines, popup)).Intersect(new Rect(0, 0, bgr.Width, bgr.Height));
+        if (titleArea.Width <= 0 || titleArea.Height <= 0)
+            return true;
+        using var row = new Mat(bgr, titleArea);
+        var mean = Cv2.Mean(row);
+        double look = mean.Val0 + mean.Val1 * 1000 + mean.Val2 * 1000000;
+        lock (rejecting)
+            return rejected.TryGetValue((box.X, box.Y, width), out double seen) && seen == look;
+    }
+
     internal async Task<Reading?> ReadAsync(Mat bgr, Box box, double popup)
     {
         int width = Math.Min(box.Width, Px(Tune.MaxWidth, popup));
@@ -225,7 +304,7 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
     // The price asked for in the background: the trade site may take seconds, and a label
     // must not hold the control that long (hotkey, follow and scan wait for it; review
     // 20.10.). The glance picks the answer up and has the window labelled anew.
-    private sealed class PriceFetch
+    internal sealed class PriceFetch
     {
         public readonly CancellationTokenSource Cancel = new();
         public Task<TradeAnswer> Task = System.Threading.Tasks.Task.FromResult(TradeAnswer.NoListing);
@@ -242,18 +321,35 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
     // again when the reading's values change, or AskAgainAfter without an answer.
     // The exact-price key on a shown tooltip: asked anew, as the item is (Exact), until another
     // item's tooltip comes. null: the window is not a tooltip's.
+    // A window that holds a tooltip as its content (the stash): the key reaches the tooltip.
     public static IOpenWindow? Exact(IOpenWindow open)
     {
+        if (open is ITooltipHost host)
+            return host.Tooltip is Open held ? host.WithTooltip(Exact(held)) : null;
         if (open is not Open shown)
             return null;
         shown.Fetch?.Cancel.Cancel();
         return shown with { Exact = true, Answer = null, Fetch = null, Priced = false };
     }
 
-    // Answer: what the trade site said for this reading (null: not yet).
-    private sealed record Open(TooltipGameWindow Kind, Box Tooltip, Reading Reading, double Popup, TradeAnswer? Answer, PriceFetch? Fetch = null, bool Priced = false, DateTimeOffset AskedAt = default, float[]? Look = null, bool Exact = false) : IOpenWindow
+    private static Open Exact(Open shown)
     {
+        shown.Fetch?.Cancel.Cancel();
+        return shown with { Exact = true, Answer = null, Fetch = null, Priced = false };
+    }
+
+    // Answer: what the trade site said for this reading (null: not yet). Hosted: held by
+    // another window (LookAsync hosted).
+    internal sealed record Open(TooltipGameWindow Kind, Box Tooltip, Reading Reading, double Popup, TradeAnswer? Answer, PriceFetch? Fetch = null, bool Priced = false, DateTimeOffset AskedAt = default, float[]? Look = null, bool Exact = false, InventoryWindow? Inventory = null, bool Hosted = false) : IOpenWindow
+    {
+        // The window that held this tooltip closes: the question to the trade site goes with it.
+        internal void Drop() => Fetch?.Cancel.Cancel();
+
         private readonly Misses misses = new();
+
+        // Glances in a row that did not find the title row (the host logs the first Gone only:
+        // its glance may be dropped while a follow runs, and the next one says Gone again).
+        internal int Misses => misses.Count;
 
         public IGameWindow Window => Kind;
 
@@ -296,20 +392,30 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
         {
             var boxes = Kind.Pipeline.WaystoneTooltips(frame.Image, frame.Popup);
             var box = boxes.FirstOrDefault(b => Math.Abs(b.X - Tooltip.X) <= Tune.GlanceSlack && Math.Abs(b.Y - Tooltip.Y) <= Tune.GlanceSlack);
+            string hidden = Hosted ? "" : "hidden: ";
             if (box is null)
             {
                 Fetch?.Cancel.Cancel();
-                context.Log($"hidden: {Reading.What.ToLowerInvariant()} tooltip gone");
+                context.Log($"{hidden}{Reading.What.ToLowerInvariant()} tooltip gone");
                 return null;
             }
             var reading = await Kind.ReadAsync(frame.Image, box, frame.Popup);
             if (reading is null)
             {
                 Fetch?.Cancel.Cancel();
-                context.Log($"hidden: {Reading.What.ToLowerInvariant()} tooltip no longer read");
+                context.Log($"{hidden}{Reading.What.ToLowerInvariant()} tooltip no longer read");
                 return null;
             }
             bool same = Reading.SameItem(reading);
+            // Another item at the same place: the inventory panel is asked for as at the first
+            // look — the loot tooltip can take the place of an item's tooltip just closed
+            // (review 08.11.2026). Not when hosted: the panel is open with the host.
+            if (!same && !Hosted && Kind.Panel(frame.Image, context) is null && !context.Observe)
+            {
+                Fetch?.Cancel.Cancel();
+                context.Log($"hidden: another {reading.What.ToLowerInvariant()} tooltip at the place, without the inventory panel on screen");
+                return null;
+            }
             var merged = same ? Reading.Merge(reading) : reading;
             bool sameValues = same && merged.SameValues(Reading);
             if (!sameValues)
@@ -337,8 +443,9 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
             // Asked by itself with the live switch (Settings.LiveTradePrice); the exact-price key
             // asks even while it is off: the user asked for this one item (21.10.2026).
             // Nothing of the tooltip understood (a client language the program does not read):
-            // no question, it would price any item of the tier or kind.
-            bool tooltipPrice = (context.Settings.LiveTradePrice || Exact) && Reading.Understood;
+            // no question, it would price any item of the tier or kind. Unidentified: no
+            // question either, the base's price is not the item's.
+            bool tooltipPrice = (context.Settings.LiveTradePrice || Exact) && Reading.Understood && !Reading.Unidentified;
             int tolerance;
             Func<ITradePrices, string, CancellationToken, Task<TradeAnswer>> ask;
             if (Reading.Waystone is { } waystone)
@@ -411,6 +518,7 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
             }
             string priceText = Price is not null ? labels[0].Text!
                 : !Reading.Understood ? Texts.Get("TooltipNotRead")
+                : Reading.Unidentified ? Texts.Get("TooltipUnidentified")
                 : !tooltipPrice ? Texts.Get("WaystonePriceOff")
                 : fetch is not null ? Texts.Get("WaystonePriceAsking")
                 : Answer is { Asked: false } busy ? busy.Reason()
@@ -422,8 +530,8 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
                 Reading.Waystone is { } ws ? Texts.Get("WaystoneStatus", ws.Tier, priceText) : Texts.Get("TabletStatus", Reading.Tablet!.Kind.Name, priceText),
                 $"{Reading.Title}, {Reading.ModCount} mods, as {asIn}{(matches ? "" : " (not every condition)")}, {priceText}",
                 Reading.Waystone is { } wr
-                    ? new { Window = "waystone", Tooltip, Reading = wr, Profile = profileName, Matches = matches, Price, NotAsked = Answer?.Why, Labels = labels }
-                    : new { Window = "tablet", Tooltip, Reading = Reading.Tablet, Profile = profileName, Matches = matches, Price, NotAsked = Answer?.Why, Labels = labels }
+                    ? new { Window = "waystone", Tooltip, Reading = wr, Profile = profileName, Matches = matches, Price, NotAsked = Answer?.Why, Inventory, Labels = labels }
+                    : new { Window = "tablet", Tooltip, Reading = Reading.Tablet, Profile = profileName, Matches = matches, Price, NotAsked = Answer?.Why, Inventory, Labels = labels }
             );
         }
 
@@ -436,4 +544,12 @@ public sealed class TooltipGameWindow(Pipeline pipeline, ITradePrices? prices = 
             string.Join(", ", new[] { ("IIR", r.ItemRarity), ("pack", r.PackSize), ("rarity", r.MonsterRarity), ("eff", r.Effectiveness), ("drop", r.DropChance) }
                 .Where(p => p.Item2 is { } v && v > 0).Select(p => $"{p.Item1} {p.Item2}"));
     }
+}
+
+// A window that holds a waystone's or tablet's tooltip as part of its content (the stash
+// with the inventory beside it): the exact-price key reaches the tooltip through it.
+internal interface ITooltipHost
+{
+    IOpenWindow? Tooltip { get; }
+    IOpenWindow WithTooltip(IOpenWindow tooltip);
 }

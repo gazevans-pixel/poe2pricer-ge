@@ -19,13 +19,11 @@ Source: https://github.com/Dev-Jahn/poe2-ritual-checker, commit 7c16291. Taken o
 Not taken over: grid search, tooltip/OCR evaluation, Korean interface, controller cursor mask,
 trade queries, screen recording.
 
-The game pictures in Dev-Jahn's data folder (`images/`, `official-images/`) are material of
-Grinding Gear Games (via poe2db.tw and web.poecdn.com) and are **not** covered by the MIT licence.
-poe2pricer ships the part of that folder the recognition reads (`data/catalog`: `catalog.json`,
-`recognition-model.json`, `official-references.json`, 884 catalogue pictures in `images/`, 439
-official reference pictures in `official-images/`; 49 MB in all, as of commit 7c16291). The
-pictures and names in it are material of Grinding Gear Games; the JSON files come from
-Dev-Jahn's project (MIT).
+`data/catalog/recognition-model.json` comes from Dev-Jahn's project (MIT): the appearance of
+the items learned from his game pictures, stamped with the version of the catalogue it is
+shipped with. The catalogue itself (`catalog.json`, `images/`) was taken from his data folder
+up to version 1.4.0; since then poe2pricer builds it from the sources named under "Item
+catalogue" below. The shape of `catalog.json` and the item ids are still his.
 
 ```
 MIT License
@@ -59,9 +57,8 @@ third-party dependencies retain their respective rights and licenses.
 `data/fonts/Caveat-Bold.ttf`, built into `Poe2Pricer.Core` unchanged (303,088 bytes), from
 https://github.com/googlefonts/caveat (`fonts/ttf/Caveat-Bold.ttf`). The German client of Path of
 Exile 2 writes the rumour lines of the panel in this font (it carries the older version 1.500,
-`art/2dart/fonts/caveat-bold.ttf`, which the project no longer publishes; against the game's lines
-both versions measure the same). poe2pricer draws the German rumour lines with it to recognise
-them by their picture (`RumourLineArt.cs`).
+`art/2dart/fonts/caveat-bold.ttf`, which the project no longer publishes). poe2pricer draws the
+German rumour lines with it to recognise them by their picture (`RumourLineArt.cs`).
 
 Licence (`data/fonts/Caveat-OFL.txt`):
 
@@ -190,11 +187,47 @@ I cannot be held liable for any damage arising out of the use of this font.
 dafont.com lists the font as "100% Free" with the author's note: "free for anyone to use
 anywhere at any time in any way they like, no strings attached".
 
+## Item catalogue (`data/catalog`, game material)
+
+`catalog.json` names every item the Ritual grid can show, with the slot it takes in cells and
+its picture; `images/` holds the pictures. `tools/catalog_update.py` builds both. The names,
+slot sizes and art paths come from Grinding Gear Games: the item lists of poe.ninja (unofficial
+use of its API; everything it prices) and the static item list of the trade site
+(https://www.pathofexile.com/api/trade2/data/static; the currency-like items, priced or not).
+The pictures of currency-like items come from the game's image service at
+https://web.poecdn.com; the pictures of uniques from https://cdn.poe2db.tw, by the art path
+the image service names, because the image service has no unique art at a usable size. The
+names and pictures are material of Grinding Gear Games and are **not** covered by the MIT
+licence of this program; 1219 entries and 1086 pictures, 42 MB, as of 2026-10-30.
+
+## gazevans-pixel/poe2pricer-ge (fork of this program)
+
+Source: https://github.com/gazevans-pixel/poe2pricer-ge, commits of 2026-10-31 (MIT, the same
+licence as this program). Its "rune chain" measured the rune tiles of the remnant list and the
+crowned tile among them first. Taken over as measurements and method, rewritten here: where the
+tiles of a row stand (28 px from the list's left edge, 54 px apart, 50 px square, 50 px above
+the name in the controller UI) and the crown as the share of gold pixels in the tile's frame
+ring, summed with an integral image (`RuneBook.CrownRing`, after its `CrownedInList`). The
+thresholds, the hue bound and everything else in `RuneBook` were measured and written anew.
+
+## Runes of Expedition remnants (`data/runes`, game material)
+
+`runes.json` names the 33 runes a Runic Remnant can carry, with the name and the effect lines
+the game shows for each ("Monsters gain: Increased Monster Rarity") in English, German and
+Russian, and the program's default class of each rune; `tome/` and `remnant/` hold the picture
+of each rune as the game draws it in the Runeshape list (50 px) and on the bar above a
+remnant (60 px). `tools/rune_data.py` builds all of it from the game's own data files, read
+from a Steam installation with poe-dat (SnosMe/poe-dat-viewer, MIT): the tables
+Expedition2Runes, ArchnemesisMods and Mods and the interface textures under
+`Art/Textures/Interface/2D/2DArt/UIImages/InGame/Expedition`. The names, texts and pictures are
+material of Grinding Gear Games and are **not** covered by the MIT licence of this program;
+as of 2026-11-01 (patch 0.5.5e).
+
 ## Game interface pieces (`data/ui`, game material)
 
 The small pictures in `data/ui` are pieces of the interface of Path of Exile 2, used as
-templates to find windows, tooltips, buttons and stash tabs in a capture: cut from the game's
-interface files or from screenshots of the game. `data/ui/glyphs` holds 15 such pictures of
+templates to find windows, tooltips, buttons, stash tabs and the inventory panel in a capture:
+cut from the game's interface files or from screenshots of the game. `data/ui/glyphs` holds 15 such pictures of
 the lettering of item tooltips, the digits 0 to 9, the brackets, the minus, plus and per cent
 signs, cut from screenshots at popup size 1.0; poe2pricer compares them with a tooltip where
 the text recognition left a number out. All of these are material of Grinding Gear Games. The
@@ -488,11 +521,3 @@ the file:** the project `Poe2Pricer.App` removes it from the output folder after
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
-
-## Rune pictures (data/runes)
-
-`data/runes`: 33 pictures of the runes of Grand Expeditions as the game draws them on a Runic
-Remnant's bar, captured from the game at 3840×2160 and brought to 1440, each named as the game
-names the rune; the names were matched against the rune icons on poe2db.tw
-(https://poe2db.tw/us/Runeshape_Combinations). Material of Grinding Gear Games, not covered by
-the MIT licence.

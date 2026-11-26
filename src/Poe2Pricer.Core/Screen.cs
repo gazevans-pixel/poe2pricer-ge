@@ -6,20 +6,33 @@ namespace Poe2Pricer.Core;
 // Adapters: WindowsGameScreen (the real game) and, in tests, a sequence of PNG files.
 public interface IGameScreen
 {
-    // Cheap (two system calls), any thread. Our own windows count as the game: showing the
-    // overlay must not make the next check hide it again.
+    // The game owns the foreground window. Cheap (two system calls), any thread. Our own windows
+    // do not count: with the settings window in front the prices go, and come back with the next
+    // click into the game. (Until 31.10.2026 our windows counted as the game, and with a browser's
+    // full-screen video over the game, Alt+Tab to the settings drew the covered game's prices over
+    // the video — OFFEN F11. The overlay windows themselves are never activated, so showing them
+    // cannot take the foreground.)
     bool InFront { get; }
 
-    // The game window itself is in front, not one of ours. Only then may a picture be saved
-    // (the diagnosis): the capture is the game's place on the screen, and with our settings
-    // window in front that place shows whatever else lies there.
-    bool GameInFront => InFront;
+    // The pictures come from the game's window itself (window capture), not from the screen.
+    // From the screen, whatever lies over the game is in the picture too — another window, a
+    // video — so then no picture is written to disk: the diagnosis keeps its JSON only, and
+    // the evidence pictures of the extended diagnostics stay off (31.10.2026).
+    bool PicturesFromWindow => true;
 
     // Off the UI thread. null: game not found or capture failed. The caller disposes the frame.
     // The picture comes at reference size (GameView). area: only this part of it is needed;
     // the frame keeps its size and is black outside of it (the glance: a part is taken in a
     // third of the time).
     GameCapture.Frame? Capture(Box? area = null);
+
+    // The follow's capture (OverlayEngine.FollowOnceAsync): the same picture, taken for a
+    // reading of the window rather than a glance at it. Its area is the window's FollowArea —
+    // the whole picture until 31.10.2026; at 3840×2160 that was 33 MB read back from the GPU
+    // and resized every second and after every glance that saw the cursor move, with every
+    // glance waiting behind it (OFFEN Z11). Its own method, so that a test double can tell a
+    // reading from a glance by more than the area.
+    GameCapture.Frame? Read(Box? area = null) => Capture(area);
 
     // The game's window as it is on the screen, for the diagnosis. The caller disposes it.
     GameCapture.Shot? Snapshot();
@@ -58,22 +71,59 @@ public sealed class WindowsGameScreen : IGameScreen, IDisposable
 
     // The window gave nothing (window capture is not available on this Windows, see
     // WindowCapture.Unavailable, or it stopped) or a black picture while the screen showed the
-    // game (a window in exclusive fullscreen, a driver): the screen is read for the rest of the
-    // run, and the overlay must keep out of captures again (Program). Told once, off the UI
-    // thread, with the reason. A black screen as well is the game itself (its loading screen,
-    // 22.10.2026: the client restarted in another language fell back for nothing) and no fault
-    // of the capture.
+    // game (a window in exclusive fullscreen, a driver): the screen is read until the game
+    // window changes (the client restarted: Search, CaptureRetried) or the settings are saved
+    // (GameWindowOnly), and the overlay must keep out of captures meanwhile (Program). Told
+    // once, off the UI thread, with the reason. A black screen as well is the game itself
+    // (its loading screen, 22.10.2026: the client restarted in another language fell back for
+    // nothing) and no fault of the capture. A fall-back that held for the run condemned the
+    // capture for a transient: the client restarted at another resolution, its new window
+    // gave nothing for longer than the grace while the screen showed its loading art, and
+    // the screen was read until the next start (07.11.2026 16:15, OFFEN F17). The same window
+    // is tried again every CaptureRetryEvery, quietly (a game started after the program
+    // whose loading screen outlasts the grace is no other window; review 08.11.2026): a
+    // picture that is not black ends the fall-back, anything else changes nothing.
     public bool FellBack => fellBack;
     public event Action<FallBackReason>? CaptureFellBack;
+    // The game window changed after a fall-back: the new window is read, the overlay may
+    // show in captures again (Program).
+    public event Action? CaptureRetried;
 
     private bool FromWindow => gameWindowOnly && !fellBack;
+
+    private FallBackReason fellBackReason;
+    private long retriedAt;
 
     private void FallBack(FallBackReason reason)
     {
         if (fellBack)
             return;
+        fellBackReason = reason;
+        retriedAt = Environment.TickCount64;
         fellBack = true;
         CaptureFellBack?.Invoke(reason);
+    }
+
+    // After a fall-back for a black or stopped window: one quiet try at the window every
+    // CaptureRetryEvery; a picture that is not black ends the fall-back (CaptureRetried).
+    private GameCapture.Frame? Retried(Box? area)
+    {
+        if (!fellBack || fellBackReason == FallBackReason.Unavailable || !gameWindowOnly || gameWindow == 0)
+            return null;
+        long now = Environment.TickCount64;
+        if (now - retriedAt < Tuning.Control.CaptureRetryEvery.TotalMilliseconds)
+            return null;
+        retriedAt = now;
+        var trial = GameCapture.Capture(gameWindow, area, config.PopupSize, config.Language, config.TextSize, gameWindow: true, out bool black);
+        if (trial is not null && !black)
+        {
+            troubleSince = -1;
+            fellBack = false;
+            CaptureRetried?.Invoke();
+            return trial;
+        }
+        trial?.Dispose();
+        return null;
     }
 
     public WindowsGameScreen(GameConfig config)
@@ -85,22 +135,39 @@ public sealed class WindowsGameScreen : IGameScreen, IDisposable
     private void Search()
     {
         var window = GameCapture.FindGame();
-        gameWindow = window;
         GetWindowThreadProcessId(window, out var id);
-        gameProcess = window == 0 ? 0 : (int)id;
+        int process = window == 0 ? 0 : (int)id;
+        bool other = window != 0 && (window != gameWindow || process != gameProcess);
+        gameWindow = window;
+        gameProcess = process;
+        if (other)
+            GameChanged();
     }
 
-    public bool InFront => Front(ours: true);
+    // Another game window (the client restarted, or started after the program): a fresh
+    // grace for it, and a fall-back is over — the window that fell back is gone.
+    private void GameChanged()
+    {
+        troubleSince = -1;
+        // Unavailable for good on this Windows: a retry would only fall back again and say so
+        // twice (review 08.11.2026).
+        if (!fellBack || WindowCapture.Unavailable is not null)
+            return;
+        fellBack = false;
+        CaptureRetried?.Invoke();
+    }
 
-    public bool GameInFront => Front(ours: false);
+    public bool InFront => Front();
 
-    private bool Front(bool ours)
+    public bool PicturesFromWindow => FromWindow;
+
+    private bool Front()
     {
         int game = gameProcess;
         if (game == 0)
             return false;
         GetWindowThreadProcessId(GetForegroundWindow(), out var id);
-        return id == game || ours && id == Environment.ProcessId;
+        return id == game;
     }
 
     // The window gave nothing or a black picture while the screen shows the game: for the first
@@ -116,6 +183,8 @@ public sealed class WindowsGameScreen : IGameScreen, IDisposable
 
     public GameCapture.Frame? Capture(Box? area = null)
     {
+        if (Retried(area) is { } again)
+            return again;
         var frame = GameCapture.Capture(gameWindow, area, config.PopupSize, config.Language, config.TextSize, FromWindow, out bool black);
         if (!FromWindow || gameWindow == 0)
             return frame;
@@ -130,7 +199,7 @@ public sealed class WindowsGameScreen : IGameScreen, IDisposable
             troubleSince = -1;
             return frame;
         }
-        if (!GameInFront)
+        if (!InFront)
             return frame;
         var screen = GameCapture.Capture(gameWindow, area, config.PopupSize, config.Language, config.TextSize, gameWindow: false, out _);
         if (screen is null || GameCapture.IsBlack(screen.Image))

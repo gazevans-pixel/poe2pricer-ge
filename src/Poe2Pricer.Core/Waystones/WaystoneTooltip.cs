@@ -20,7 +20,8 @@ public sealed record WaystoneReading(
     IReadOnlyList<WaystoneModReading> Mods,
     bool Corrupted,
     IReadOnlyList<string> Unread,
-    bool Ended = true
+    bool Ended = true,
+    bool Unidentified = false
 )
 {
     // Something of the tooltip was understood: a summary value, a mod, or at least its closing
@@ -29,6 +30,10 @@ public sealed record WaystoneReading(
     // stays in the client's language, and a question with the tier alone would price any
     // waystone of that tier (21.10.2026: "1 ex" for a German tooltip read as nothing). A white
     // waystone without mods has its closing line and is asked for.
+    // Unidentified: the tooltip says so ("Unidentified", a magic or rare one before it is
+    // identified: the base line as title, no name, no mods — the controller shows it for loot
+    // on the ground, 08.11.2026). It reads like a white one and is not asked for: its price is
+    // not the base's.
     public bool Understood =>
         Ended || Mods.Count > 0 || new[] { Revives, ItemRarity, PackSize, MonsterRarity, Effectiveness, DropChance }.Any(v => v is not null);
 
@@ -48,7 +53,7 @@ public sealed record WaystoneReading(
         {
             Revives = Revives ?? later.Revives, ItemRarity = ItemRarity ?? later.ItemRarity, PackSize = PackSize ?? later.PackSize,
             MonsterRarity = MonsterRarity ?? later.MonsterRarity, Effectiveness = Effectiveness ?? later.Effectiveness, DropChance = DropChance ?? later.DropChance,
-            Mods = mods, Corrupted = Corrupted || later.Corrupted, Unread = later.Unread, Ended = Ended || later.Ended,
+            Mods = mods, Corrupted = Corrupted || later.Corrupted, Unread = later.Unread, Ended = Ended || later.Ended, Unidentified = Unidentified || later.Unidentified,
         };
     }
 }
@@ -58,6 +63,11 @@ public sealed record WaystoneModReading(WaystoneMod Mod, int? Value, string Line
 public static partial class WaystoneTooltip
 {
     public static bool IsTitle(string line) => Title().IsMatch(line);
+
+    // "Unidentified" / "Nicht identifiziert" as the OCR may render it, a letter or two off
+    // ("Unidentifed", review 08.11.2026): the key within distance 2 of the word.
+    public static bool IsUnidentified(string key) =>
+        key.Length >= 9 && (TitleReader.Distance(key, "unidentified") <= 2 || TitleReader.Distance(key, "nichtidentifiziert") <= 2);
 
     // lines: the tooltip's text lines from top to bottom, as the OCR gives them. null: no
     // waystone title among them.
@@ -84,13 +94,18 @@ public static partial class WaystoneTooltip
         int? revives = null, itemRarity = null, packSize = null, monsterRarity = null, effectiveness = null, dropChance = null;
         var mods = new List<WaystoneModReading>();
         var unread = new List<string>();
-        bool corrupted = false, ended = false;
+        bool corrupted = false, ended = false, unidentified = false;
         foreach (var raw in lines.Skip(title + 1))
         {
             string line = Affix().Replace(raw, "").Trim();
             if (line.Length == 0)
                 continue;
             string key = WaystoneMods.KeyOf(line);
+            if (IsUnidentified(key))
+            {
+                unidentified = true;
+                continue;
+            }
             if (key.StartsWith("canbeusedinamapdevice") || key.StartsWith("waystonescanonlybeusedonce")
                 || key.StartsWith("kannineinemkartenapparat") || key.StartsWith("wegsteinekonnennureinmal"))
             {
@@ -128,7 +143,7 @@ public static partial class WaystoneTooltip
             else
                 unread.Add(line);
         }
-        return new(name, tier, revives, itemRarity, packSize, monsterRarity, effectiveness, dropChance, mods, corrupted, unread, ended);
+        return new(name, tier, revives, itemRarity, packSize, monsterRarity, effectiveness, dropChance, mods, corrupted, unread, ended, unidentified);
     }
 
     // A summary line: "<label>: <value>". The label is matched on its letters alone, two

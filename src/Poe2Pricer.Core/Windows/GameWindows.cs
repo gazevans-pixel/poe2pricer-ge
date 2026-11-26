@@ -11,12 +11,23 @@ namespace Poe2Pricer.Core;
 // picture; a window that keeps a record of what it saw (the rumour panel: openings per island)
 // reports the record as it stands instead of adding to it (two diagnoses on 19.10. counted two
 // openings that never were, cleared the "new" marks and moved "probably complete" closer).
-public sealed record LookContext(RumourBook Rumours, Settings Settings, Action<string> Log, Action<string, Mat>? Keep = null, bool Observe = false);
+// Clock: the time a window's reckoning goes by (when the remnant list was last seen before it
+// closed); the tests' fake time, else the system's.
+// Escaped: when the keyboard hook or the gamepad last saw a cancel (Esc, the cancel button)
+// while the game was in front (null: never, or not known here) — the remnant list closes on
+// it without a choice; Confirmed: when the gamepad last saw its confirm button (a mouse click
+// is not read) — the list closes on it with one (RemnantGameWindow.Closed). EscapeReadable:
+// the keyboard hook works; GamepadReadable: a gamepad answers, its buttons are read. Without,
+// a cancel goes unseen.
+public sealed record LookContext(RumourBook Rumours, Settings Settings, Action<string> Log, Action<string, Mat>? Keep = null, bool Observe = false, TimeProvider? Clock = null, Func<DateTimeOffset?>? Escaped = null, bool EscapeReadable = true, bool GamepadReadable = false, Func<DateTimeOffset?>? Confirmed = null)
+{
+    public DateTimeOffset Now => (Clock ?? TimeProvider.System).GetUtcNow();
+}
 
 // A window's profile: its name, the checkbox that lets the automatic scan look for it, and how
 // often an open window is followed (changed?). How often it is glanced at (still there?) is
 // the user's setting, the same for every window (Settings.GlanceIntervalSeconds).
-public sealed record WindowProfile(string Name, AutoSwitch Auto, TimeSpan Follow);
+public sealed record WindowProfile(string Name, AutoSwitch Auto);
 
 // A checkbox of the automatic scan in the settings window; windows may share one (remnant list
 // and rumour panel: Expedition). A new window that needs its own adds a Settings field and an
@@ -25,9 +36,10 @@ public sealed record WindowProfile(string Name, AutoSwitch Auto, TimeSpan Follow
 public sealed record AutoSwitch(string Label, Func<Settings, bool> Get, Func<Settings, bool, Settings> Set)
 {
     public static readonly AutoSwitch Ritual = new("SwitchRitual", s => s.AutoRitual, (s, on) => s with { AutoRitual = on });
-    public static readonly AutoSwitch Expedition = new("SwitchExpedition", s => s.AutoExpedition, (s, on) => s with { AutoExpedition = on });
+    public static readonly AutoSwitch Rumours = new("SwitchRumours", s => s.AutoRumours, (s, on) => s with { AutoRumours = on });
+    public static readonly AutoSwitch Remnant = new("SwitchRemnant", s => s.AutoRemnant, (s, on) => s with { AutoRemnant = on });
     public static readonly AutoSwitch Stash = new("SwitchStash", s => s.AutoStash, (s, on) => s with { AutoStash = on });
-    public static readonly AutoSwitch[] All = [Ritual, Expedition, Stash];
+    public static readonly AutoSwitch[] All = [Ritual, Rumours, Remnant, Stash];
 }
 
 // One kind of game window the overlay knows (Favours, stash tab, remnant list, rumour panel).
@@ -53,11 +65,22 @@ public interface IOpenWindow
     // The frame holds only GlanceArea; the rest of it is black.
     Glance Glance(Mat frame, PriceBook? ready, LookContext context);
 
+    // The same with the frame itself: for a window whose labels follow the mouse pointer (the
+    // remnant list's caption). Others look at the picture only.
+    Glance Glance(GameCapture.Frame frame, PriceBook? ready, LookContext context) => Glance(frame.Image, ready, context);
+
     // The part of the picture the glance looks at; null: all of it. Only that part is captured,
     // which is what lets the glance run this often (GameCapture.Capture).
     Box? GlanceArea => null;
 
-    // Every Profile.Follow (1 s): null when the window is gone (the reason is logged); read
+    // The part of the picture the follow and the labelling read; null: all of it. Everything
+    // FollowAsync and LabelAsync look at must lie inside (the frame is black outside): the
+    // window, its anchor, and wherever a popup, hint or dialog over it is searched. The rumour
+    // panel reads the chart all over the map and keeps the whole; a tooltip's body may reach
+    // below any band its title is searched in, so it keeps the whole too.
+    Box? FollowArea => null;
+
+    // Every GameWindows.FollowEvery (1 s): null when the window is gone (the reason is logged); read
     // again when it changed, else kept.
     Task<IOpenWindow?> FollowAsync(GameCapture.Frame frame, LookContext context);
 
@@ -91,13 +114,16 @@ public abstract record Glance
 
 // What to draw for an open window. Shown: the log line when it is drawn ("gezeigt: …");
 // Description: what the window read and named, for diagnosis and the golden-master check.
+// Marks: drawn with the labels, but no prices — the frames and the caption of the remnant
+// runes; the golden-master check and the tests of the prices look at Labels alone.
 public sealed record Picture(
     IOpenWindow Next,
     Label[] Labels,
     (Box Panel, RumourLine[] Lines, IslandSummary? Island)? Rumours,
     string Status,
     string Shown,
-    object Description
+    object Description,
+    Label[]? Marks = null
 );
 
 // The windows the overlay knows, in the order a look tries them: the only place of that order.
@@ -105,8 +131,14 @@ public sealed class GameWindows(IReadOnlyList<IGameWindow> all)
 {
     public IReadOnlyList<IGameWindow> All { get; } = all;
 
-    public static GameWindows Standard(Pipeline pipeline, Market.ITradePrices? tradePrices = null) =>
-        new([new FavoursGameWindow(pipeline), new StashGameWindow(pipeline), new RemnantGameWindow(pipeline), new RumourGameWindow(pipeline), new TooltipGameWindow(pipeline, tradePrices)]);
+    // The stash window reads the tooltips in the inventory beside it through the tooltip
+    // window (StashGameWindow), the same instance: what it put aside as no waystone's is put
+    // aside for both.
+    public static GameWindows Standard(Pipeline pipeline, Market.ITradePrices? tradePrices = null, Runes.RuneChain? chain = null)
+    {
+        var tooltips = new TooltipGameWindow(pipeline, tradePrices);
+        return new([new FavoursGameWindow(pipeline), new StashGameWindow(pipeline, tooltips), new RemnantGameWindow(pipeline, chain ?? new Runes.RuneChain()), new RumourGameWindow(pipeline), tooltips]);
+    }
 
     // The first wanted window on the frame.
     public async Task<IOpenWindow?> LookAsync(GameCapture.Frame frame, LookContext context, Func<IGameWindow, bool> wanted)

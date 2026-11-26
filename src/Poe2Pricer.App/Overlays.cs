@@ -1,5 +1,6 @@
 using System.Windows.Media;
 using Poe2Pricer.Core;
+using Poe2Pricer.Core.Runes;
 using Poe2Pricer.Core.Market;
 
 namespace Poe2Pricer.App;
@@ -8,11 +9,12 @@ namespace Poe2Pricer.App;
 // the WPF window (OverlayWindow) where that cannot be built or loses its device for good.
 public static class Overlays
 {
-    public static IOverlay Create(ImageSource? divine, ImageSource? exalted, ImageSource? chaos)
+    // timed: see CompositionOverlay (the WPF window is not timed).
+    public static IOverlay Create(ImageSource? divine, ImageSource? exalted, ImageSource? chaos, Func<bool> timed)
     {
         try
         {
-            var composition = new CompositionOverlay(divine, exalted, chaos);
+            var composition = new CompositionOverlay(divine, exalted, chaos, timed);
             FileLog.Write("Overlay: composition window");
             return new Guarded(composition, () => new OverlayWindow(divine, exalted, chaos));
         }
@@ -36,16 +38,16 @@ public static class Overlays
             inner.ExcludeFromCapture(exclude);
         }
 
-        public void Show(Box screen, Label[] labels, (Box Panel, RumourLine[] Lines, IslandSummary? Island)? rumours = null, double scale = 1)
+        public void Show(Box screen, Label[] labels, (Box Panel, RumourLine[] Lines, IslandSummary? Island)? rumours = null, double scale = 1, RuneStrip? strip = null)
         {
             try
             {
-                inner.Show(screen, labels, rumours, scale);
+                inner.Show(screen, labels, rumours, scale, strip);
             }
             catch (Exception e) when (inner is CompositionOverlay)
             {
                 FallBack(e);
-                inner.Show(screen, labels, rumours, scale);
+                inner.Show(screen, labels, rumours, scale, strip);
             }
         }
 

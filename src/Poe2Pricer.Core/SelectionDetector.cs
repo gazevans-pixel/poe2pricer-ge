@@ -45,11 +45,12 @@ public sealed class SelectionDetector : IDisposable
     }
 
     // The caret is near white with a pale yellow rim; the item behind it changes, so only
-    // bright pixels are compared, i.e. the caret's shape.
+    // bright pixels are compared, i.e. the caret's shape. Gold (the medallion and the frame of
+    // a coloured item beside the caret) is kept out by the blue floor (Tune.MinimumBlue).
     private static Mat PaleYellow(Mat bgr)
     {
         var mask = new Mat();
-        Cv2.InRange(bgr, new Scalar(0, Tune.MinimumGreen, Tune.MinimumRed), new Scalar(255, 255, 255), mask);
+        Cv2.InRange(bgr, new Scalar(Tune.MinimumBlue, Tune.MinimumGreen, Tune.MinimumRed), new Scalar(255, 255, 255), mask);
         return mask;
     }
 

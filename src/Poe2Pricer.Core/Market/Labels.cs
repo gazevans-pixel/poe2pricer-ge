@@ -21,9 +21,14 @@ public sealed record Label(
     bool Light = false,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Note = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Arrow = null,
-    // The rune panel (RuneChain.Panel): every rune known, the carried ones lit; not written
-    // into the diagnosis.
-    [property: System.Text.Json.Serialization.JsonIgnore] RuneTile[]? Runes = null
+    // Frame: a class mark at Bounds and nothing else (the crowned rune of a remnant row: a dot
+    // on the tile's bottom edge), named by the rune's class: "loot", "weaker", "danger",
+    // "neutral" (RuneClass).
+    // Caption: a plate with this text at Bounds (its height; the width follows the text, up to
+    // Bounds' width), framed in the Frame colour — the effect of the row the controller's cursor
+    // is on.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Frame = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Caption = null
 );
 
 public static class Labels

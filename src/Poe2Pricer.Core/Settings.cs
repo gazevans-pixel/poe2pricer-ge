@@ -14,19 +14,6 @@ public sealed record Settings
     // (TooltipGameWindow.Exact).
     public string ExactKey { get; init; } = "Alt+D";
 
-    // Forgets the runes carried along the map's chain (RuneChain); a new map in the game's log
-    // does it as well. Empty: no key.
-    public string RuneResetKey { get; init; } = "Alt+Shift+R";
-
-    // The game's log (logs\Client.txt in the game's folder), read for new maps (RuneChain). Empty:
-    // looked for in the standard install folders and Steam libraries.
-    public string GameLogFile { get; init; } = "";
-
-    // The rune chain of Grand Expeditions (RuneChain): runes learned from the remnants' bars, the
-    // panel at the top of the screen from the first remnant list opened in an area until it is
-    // left, the marks in the remnant list, the game's log read for a new area. Off: none of it.
-    public bool RuneChain { get; init; }
-
     // The live price at a waystone's or tablet's tooltip, asked on the trade site by itself;
     // off, nothing is asked or drawn at the tooltip. One switch for both kinds (21.10.2026);
     // the exact-price key (ExactKey) asks even while it is off.
@@ -52,12 +39,15 @@ public sealed record Settings
     // Which windows the automatic scan shows by itself; the key always shows all of them.
     // All on by default, the user switches off.
     public bool AutoRitual { get; init; } = true;
-    public bool AutoExpedition { get; init; } = true;
+    // Expedition in two: the rumour panel of the Atlas and the remnant list (until 1.4.1 one
+    // switch, AutoExpedition; a file with that entry sets both, Load).
+    public bool AutoRumours { get; init; } = true;
+    public bool AutoRemnant { get; init; } = true;
     public bool AutoStash { get; init; } = true;
 
     // The automatic scan runs: at least one window is ticked.
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool AutoAny => AutoRitual || AutoExpedition || AutoStash;
+    public bool AutoAny => AutoRitual || AutoRumours || AutoRemnant || AutoStash;
 
     // Items worth less get no label and do not compete for "most valuable" (default: show all).
     public decimal FloorValue { get; init; }
@@ -172,7 +162,7 @@ public sealed record Settings
         {
             var text = File.ReadAllText(file);
             var settings = JsonSerializer.Deserialize<Settings>(text, JsonFiles.Options) ?? new Settings();
-            return MainSwitchOff(text) ? settings with { AutoRitual = false, AutoExpedition = false, AutoStash = false } : settings;
+            return OneExpeditionSwitch(text) is { } both ? settings with { AutoRumours = both, AutoRemnant = both } : settings;
         }
         catch (JsonException)
         {
@@ -195,14 +185,18 @@ public sealed record Settings
         }
     }
 
-    // A file from an earlier version with the automatic scan switched off by its main switch
-    // ("autoScan": false): nothing was shown by itself, so none of the three windows is ticked
-    // now. The next save writes the file without the old entry, and what is ticked from then
-    // on counts.
-    private static bool MainSwitchOff(string json) =>
-        System.Text.Json.Nodes.JsonNode.Parse(json) is System.Text.Json.Nodes.JsonObject node
-        && node.FirstOrDefault(p => p.Key.Equals("autoScan", StringComparison.OrdinalIgnoreCase)).Value is { } old
-        && old.GetValueKind() == JsonValueKind.False;
+    // A file from before 1.4.2 with the one switch "autoExpedition" and neither of the two it
+    // became: its value for both. null: nothing to carry over.
+    private static bool? OneExpeditionSwitch(string json)
+    {
+        if (System.Text.Json.Nodes.JsonNode.Parse(json) is not System.Text.Json.Nodes.JsonObject node)
+            return null;
+        bool Has(string name) => node.Any(p => p.Key.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (Has("autoRumours") || Has("autoRemnant"))
+            return null;
+        var old = node.FirstOrDefault(p => p.Key.Equals("autoExpedition", StringComparison.OrdinalIgnoreCase)).Value;
+        return old?.GetValueKind() is JsonValueKind.True or JsonValueKind.False ? old.GetValue<bool>() : null;
+    }
 
     public void Save() => Save(FilePath);
 

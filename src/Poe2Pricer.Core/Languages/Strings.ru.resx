@@ -93,9 +93,6 @@
   <data name="SwitchRitual" xml:space="preserve">
     <value>Ритуал (награды)</value>
   </data>
-  <data name="SwitchExpedition" xml:space="preserve">
-    <value>Экспедиция (слухи / останки)</value>
-  </data>
   <data name="SwitchStash" xml:space="preserve">
     <value>Сундук</value>
   </data>
@@ -269,6 +266,9 @@
   </data>
   <data name="DiagnosticsNeedForeground" xml:space="preserve">
     <value>Для диагностики окно Path of Exile 2 должно быть активным</value>
+  </data>
+  <data name="DiagnosticsNoPictureScreen" xml:space="preserve">
+    <value>Снимок не сохранён: захват экрана мог бы показать другие окна</value>
   </data>
   <data name="DiagnosticsSaved" xml:space="preserve">
     <value>Диагностика сохранена: {0}</value>
@@ -553,6 +553,12 @@
   </data>
   <data name="KeyNumLock" xml:space="preserve">
     <value>Num Lock</value>
+  </data>
+  <data name="GameVersionDiffers" xml:space="preserve">
+    <value>Версия игры {0}; этот выпуск проверен с {1}. Обновление игры может изменить окна, которые читает программа.</value>
+  </data>
+  <data name="TooltipUnidentified" xml:space="preserve">
+    <value>не опознан, цены нет</value>
   </data>
   <data name="GameTextSizeNotDefault" xml:space="preserve">
     <value>Размер текста интерфейса «{0}» проверен менее подробно: если часть окна не распознаётся, нажмите {1} и сообщите об этом.</value>
@@ -880,10 +886,52 @@
   <data name="GameLanguageNotRead" xml:space="preserve">
     <value>Язык игры «{0}» не распознаётся: для цен нужен английский или немецкий клиент игры.</value>
   </data>
-  <data name="RuneChain" xml:space="preserve">
-    <value>Цепь рун</value>
+  <data name="SwitchRumours" xml:space="preserve">
+    <value>Экспедиция (слухи)</value>
   </data>
-  <data name="TipRuneChain" xml:space="preserve">
-    <value>Большие экспедиции: руна в коронованной ячейке останков переходит на все последующие группы цепи и учитывается один раз. С первого открытого на карте списка останков панель вверху экрана показывает все уже встреченные руны, а переносимые цепью этой карты подсвечены; в списке строка, чья коронованная руна уже переносится, отмечается красным. Журнал игры читается, чтобы понять, когда вы покидаете карту. Alt+Shift+R очищает цепь. Выкл.: ничего не изучается, не читается и не рисуется.</value>
+  <data name="SwitchRemnant" xml:space="preserve">
+    <value>Экспедиция (останки)</value>
+  </data>
+  <data name="TabRunes" xml:space="preserve">
+    <value>Руны</value>
+  </data>
+  <data name="GroupRunes" xml:space="preserve">
+    <value>Руны списка останков</value>
+  </data>
+  <data name="ColumnRune" xml:space="preserve">
+    <value>Руна</value>
+  </data>
+  <data name="ColumnEffect" xml:space="preserve">
+    <value>Эффект</value>
+  </data>
+  <data name="ColumnClass" xml:space="preserve">
+    <value>Класс добычи</value>
+  </data>
+  <data name="RuneClassLoot" xml:space="preserve">
+    <value>Добыча</value>
+  </data>
+  <data name="RuneClassWeaker" xml:space="preserve">
+    <value>Слабее</value>
+  </data>
+  <data name="RuneClassDanger" xml:space="preserve">
+    <value>Опасность</value>
+  </data>
+  <data name="RuneClassNeutral" xml:space="preserve">
+    <value>Нейтрально</value>
+  </data>
+  <data name="RunesHint" xml:space="preserve">
+    <value>Класс руны задаёт цвет её точки в списке останков — у руны, которую строка передаёт следующим группам цепи взрывов. Добыча: больше редкости или больше редких монстров. Слабее: больше монстров, для добычи ничего сверх того. Опасность: только более сильные монстры. Нейтрально: белая. Значения по умолчанию — прочтение программой игровых данных; настраивайте по своему усмотрению. Сохраняется вместе с настройками.</value>
+  </data>
+  <data name="ResetRunes" xml:space="preserve">
+    <value>Классы по умолчанию</value>
+  </data>
+  <data name="OverlayRuneChain" xml:space="preserve">
+    <value>Цепь рун · {0}</value>
+  </data>
+  <data name="ResetChain" xml:space="preserve">
+    <value>Сбросить цепь рун</value>
+  </data>
+  <data name="RunesNotSaved" xml:space="preserve">
+    <value>Не удалось записать классы рун: {0}</value>
   </data>
 </root>

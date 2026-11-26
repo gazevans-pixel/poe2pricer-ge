@@ -18,9 +18,12 @@ public sealed class Pipeline : IDisposable
     public RemnantReader Remnants { get; }
     public RumourReader Rumours { get; }
     public StashTabReader Stash { get; }
+    // The inventory panel: a waystone or tablet is priced only while it is on screen.
+    public InventoryPanel Inventory { get; }
 
-    // The crowned runes carried along this map's explosive chain (Runic Remnants).
-    public RuneChain Runes { get; }
+    // The runes of Expedition remnants (data/runes beside data/ui): the crowned tile of a
+    // remnant row and its rune.
+    public Runes.RuneBook Runes { get; }
 
     // Item art from poe.ninja for naming stash slots; fetched by the caller (EnsureAsync).
     public IconStore Icons { get; }
@@ -42,7 +45,8 @@ public sealed class Pipeline : IDisposable
         Remnants = new RemnantReader(uiDirectory, Titles);
         Rumours = new RumourReader(uiDirectory, Titles, rumourShapes);
         Stash = new StashTabReader(uiDirectory);
-        Runes = new RuneChain(uiDirectory);
+        Inventory = new InventoryPanel(uiDirectory);
+        Runes = new Runes.RuneBook(Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(uiDirectory)) ?? uiDirectory, "runes"));
         Icons = icons ?? new IconStore();
         Identifier = new StashIdentifier(Icons);
     }
@@ -51,10 +55,15 @@ public sealed class Pipeline : IDisposable
     // The band grows with the popup size: the game opens the tooltip that much further from the
     // window (measured: the left end moves from 766 at popup size 0.80 to 789 at 1.29, the
     // window's edge at 776).
+    // Item tooltips beside the list (keyboard and mouse) and the game's rune tooltip inside the
+    // list box (both UI modes; RemnantReader.RuneTooltips).
     public Box[] RemnantTooltips(Mat frame, RemnantWindow window, double popup = GameConfig.StandardPopup) =>
-        window.Mode == UiMode.KeyboardMouse
-            ? Occluders.TooltipsAt(frame, window.WindowRight - RemnantReader.Band(Tuning.Remnants.TooltipBandLeft, popup), window.WindowRight + RemnantReader.Band(Tuning.Remnants.TooltipBandRight, popup), popup)
-            : [];
+        [
+            .. window.Mode == UiMode.KeyboardMouse
+                ? Occluders.TooltipsAt(frame, window.WindowRight - RemnantReader.Band(Tuning.Remnants.TooltipBandLeft, popup), window.WindowRight + RemnantReader.Band(Tuning.Remnants.TooltipBandRight, popup), popup)
+                : [],
+            .. RemnantReader.RuneTooltips(frame, window, popup),
+        ];
 
     // Title bars of item tooltips anywhere on the frame but its lowest part (the bottom holds
     // the hotbar and the search box), as the waystone window looks for them.
@@ -80,6 +89,7 @@ public sealed class Pipeline : IDisposable
         Glyphs.Dispose();
         Remnants.Dispose();
         Rumours.Dispose();
+        Inventory.Dispose();
         Runes.Dispose();
         Icons.Dispose();
     }

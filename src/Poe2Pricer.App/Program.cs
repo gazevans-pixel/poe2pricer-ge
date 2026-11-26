@@ -6,6 +6,7 @@ using OpenCvSharp;
 using Rect = System.Windows.Rect;
 using Poe2Pricer.Core;
 using Poe2Pricer.Core.Market;
+using Poe2Pricer.Core.Runes;
 using Poe2Pricer.Ui.ViewModels;
 using Poe2Pricer.Ui.Views;
 
@@ -54,7 +55,7 @@ public static class Program
             // read the run from the log, and when it ended.
             // The log's lines carry the time only; the date here tells which day they belong to.
             // The Windows build in the first line: what a capture or a key can do depends on it
-            // (WDA_EXCLUDEFROMCAPTURE from 10.0.19041, the borderless window capture from 22621),
+            // (WDA_EXCLUDEFROMCAPTURE from 10.0.19041, the borderless window capture from 20348),
             // and an issue rarely says it.
             FileLog.Write($"Started: {AppInfo.NameAndVersion}, {DateTime.Now:yyyy-MM-dd}, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}, {Environment.ProcessPath}, PID {Environment.ProcessId}");
         }
@@ -133,8 +134,6 @@ public static class Program
             }
         });
         using var pipeline = new Pipeline(settings.DataPath, ui, rumourShapes: rumourShapes);
-        // The game's runes (data/runes) and where the chain's pictures go (RuneChain).
-        pipeline.Runes.UseCatalog(Path.Combine(Settings.Folder, "rune-catalog"), Path.Combine(AppContext.BaseDirectory, "data", "runes"), FileLog.Write);
         var catalog = pipeline.Recognizer.Catalog.Items.ToDictionary(i => i.Id);
         ImageSource? Orb(string id) =>
             catalog.TryGetValue(id, out var item) ? LabelLayer.LoadImage(Path.Combine(settings.DataPath, item.Image)) : null;
@@ -144,7 +143,7 @@ public static class Program
             // POE2PRICER_LANGUAGE: the window in that language (the picture of a language pack).
             if (Environment.GetEnvironmentVariable("POE2PRICER_LANGUAGE") is { Length: > 0 } shown)
                 Texts.Language = shown;
-            var shownModel = new MainViewModel(settings, ["Forbidden Rites", "Runes of Aldur", "Standard"], RumourBook.LoadCached());
+            var shownModel = new MainViewModel(settings, ["Forbidden Rites", "Runes of Aldur", "Standard"], RumourBook.LoadCached(), runes: pipeline.Runes);
             // POE2PRICER_WARNINGS: the window with two lasting warnings (how the lines look).
             if (Environment.GetEnvironmentVariable("POE2PRICER_WARNINGS") is { Length: > 0 })
             {
@@ -180,22 +179,43 @@ public static class Program
 
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var iconPath = Path.Combine(AppContext.BaseDirectory, "poe2pricer.ico");
-        var overlay = Overlays.Create(Orb("Divine_Orb"), Orb("Exalted_Orb"), Orb("Chaos_Orb"));
+        // The settings as they were last saved, for what asks them at the moment (the overlay's
+        // timing, which listings count at the trade site).
+        var savedSettings = settings;
+        var overlay = Overlays.Create(Orb("Divine_Orb"), Orb("Exalted_Orb"), Orb("Chaos_Orb"), () => savedSettings.ExtendedDiagnostics);
         var gameConfig = new GameConfig(settings.GameConfigFile);
         using var screen = new WindowsGameScreen(gameConfig);
         using var prices = new NinjaPrices(settings);
         var rumourBook = RumourBook.LoadCached();
         // The trade site, asked for waystone prices with poe.ninja's rates for the currencies.
         using var trade = new TradeClient(() => prices.Ready, FileLog.Write);
-        // Which listings count follows the settings as they were last saved.
-        var tradeSettings = settings;
-        trade.InPerson = () => tradeSettings.TradeInPerson;
-        using var engine = new OverlayEngine(GameWindows.Standard(pipeline, trade), screen, prices, () => rumourBook, settings, TimeProvider.System, FileLog.Write);
+        trade.InPerson = () => savedSettings.TradeInPerson;
+        // The rune chain of the map: learned from the remnant lists and the bars above the
+        // remnants, forgotten with the next map (ChainTracker reads the game's Client.txt; until
+        // it is found the chain stays off).
+        var chain = new RuneChain(tracked: false);
+        // The game's explosives counter, for the chain's expedition boundaries (RuneChain.Complete).
+        using var explosives = new ExplosivesReader(ui);
+        FileLog.Write($"Rune chain: the explosives counter's digits are known for screens {string.Join(", ", explosives.DigitHeights)} px high (the controller block's line and the keyboard button's box)");
+        using var engine = new OverlayEngine(GameWindows.Standard(pipeline, trade, chain), screen, prices, () => rumourBook, settings, TimeProvider.System, FileLog.Write, chain, explosives);
+        chain.Changed += engine.ChainChanged;
+        using var chainTracker = new ChainTracker(chain, FileLog.Write);
         // A rumour panel read before the lines were drawn has lines without a name, and on a
         // client that is not English nothing else names them: they are looked at again once
         // the drawing is done (it takes a few seconds).
         _ = drawing.ContinueWith(_ => engine.RumoursChanged(), TaskScheduler.Default);
-        var model = new MainViewModel(settings, [], rumourBook);
+        // The player's own rune classes (runes-own.json beside the settings).
+        pipeline.Runes.UseOwn(Settings.Folder, FileLog.Write);
+        var model = new MainViewModel(settings, [], rumourBook, runes: pipeline.Runes);
+        // The game's version (Client.txt): logged, and a line of the window while its number is
+        // not the one this release was tested with (AppInfo.TestedGameVersion; a hotfix letter
+        // does not count) — a game update can change the windows the program reads. Closable;
+        // closed once, it stays away for this version of the program.
+        chainTracker.GameVersion = version => app.Dispatcher.BeginInvoke(() =>
+        {
+            FileLog.Write($"Game version: {version} (this release was tested with {Poe2Pricer.Core.AppInfo.TestedGameVersion})");
+            model.Warn("gameversion", Poe2Pricer.Core.AppInfo.SameGamePatch(version, Poe2Pricer.Core.AppInfo.TestedGameVersion) ? null : new Poe2Pricer.Core.Told("GameVersionDiffers", version, Poe2Pricer.Core.AppInfo.TestedGameVersion), hint: "gameversion");
+        });
         // The game read from its own window or from the screen (Settings.CaptureGameWindow): the
         // overlay keeps out of screen captures only while the screen is read. A black picture of
         // the window falls back to the screen for the run: a line of the window and the log say so.
@@ -217,6 +237,18 @@ public static class Program
             var told = new Poe2Pricer.Core.Told(reason == Poe2Pricer.Core.FallBackReason.Unavailable ? "CaptureUnavailable" : "CaptureFellBack");
             FileLog.Write(told.English + (reason == Poe2Pricer.Core.FallBackReason.Unavailable ? $" ({Poe2Pricer.Core.WindowCapture.Unavailable})" : ""));
             model.Warn("capture", told, hint: reason == Poe2Pricer.Core.FallBackReason.Unavailable ? "capture unavailable" : "capture black");
+            });
+        };
+        // After a fall-back the game window gives pictures again (the client restarted, or
+        // the same window past its loading screen on a retry): it is read, so the overlay may
+        // show in captures again and the line goes.
+        screen.CaptureRetried += () =>
+        {
+            overlay.ExcludeFromCapture(!screen.GameWindowOnly);
+            app.Dispatcher.BeginInvoke(() =>
+            {
+                FileLog.Write("Game window gives pictures again: reading the game window again");
+                model.Warn("capture", null);
             });
         };
         // "Price" on the Waystones tab: the cheapest waystone the profile describes, in the
@@ -319,34 +351,14 @@ public static class Program
             e.SetObserved();
         };
         // The overlay control decides on its own thread; the overlay window lives on the UI thread.
-        // The rune panel (RuneChain.Panel) stands at the top of the screen whenever the game is
-        // in front and a rune is known: with the labels of the window shown, or alone. Composed
-        // here on the UI thread, so the control's windows stay as they are.
-        Scene? engineScene = null;
-        bool showRunes = settings.RuneChain;
-        void Compose()
-        {
-            Label? panel = null;
-            if (showRunes && pipeline.Runes.Active && screen.InFront)
-            {
-                (Box Screen, double Scale)? place = engineScene is { } sc ? (sc.Screen, sc.Scale) : pipeline.Runes.Seen;
-                if (place is { } p)
-                    panel = RuneChain.Panel(pipeline.Runes.Tiles, p.Screen, p.Scale);
-            }
-            if (engineScene is { } scene)
-                overlay.Show(scene.Screen, panel is null ? scene.Labels : [.. scene.Labels, panel], scene.Rumours, scene.Scale);
-            else if (panel is not null && pipeline.Runes.Seen is { } seen)
-                overlay.Show(seen.Screen, [panel], null, seen.Scale);
-            else
-                overlay.Clear();
-        }
         engine.Draw += scene =>
             app.Dispatcher.BeginInvoke(() =>
             {
-                engineScene = scene;
-                Compose();
+                if (scene is null)
+                    overlay.Clear();
+                else
+                    overlay.Show(scene.Screen, scene.All, scene.Rumours, scene.Scale, scene.Strip);
             });
-        pipeline.Runes.Changed += () => app.Dispatcher.BeginInvoke(Compose);
         // Evidence pictures (a detected reroll in the Ritual window) go beside the diagnoses;
         // the engine writes them only with "Extended diagnostics" on (Settings).
         string diagnosticsFolder = Path.Combine(Settings.Folder, "diagnostics");
@@ -361,10 +373,13 @@ public static class Program
                 app.Dispatcher.BeginInvoke(() => tray.Notify(Texts.Get("DiagnosticsSavedTray")));
         };
         // Not while a key field of the program window waits for a key (KeyBox.Listening).
-        using var keys = new KeyboardHook(app.Dispatcher) { Active = () => screen.InFront && !KeyBox.Listening };
+        using var keys = new KeyboardHook(app.Dispatcher) { Active = () => screen.InFront && !KeyBox.Listening, Escape = () => engine.Escaped("Esc") };
+        engine.EscapeReadable = keys.Error is null;
+        // The gamepad's cancel button, read like Esc, and its confirm button (GamepadWatch).
+        using var pad = new GamepadWatch { Active = () => screen.InFront, Cancel = () => engine.Escaped("the gamepad's cancel button"), Confirm = () => engine.Confirmed("the gamepad's confirm button"), Log = FileLog.Write };
+        engine.GamepadReadable = () => pad.Readable;
         using var foreground = new ForegroundWatcher();
         foreground.Changed += engine.ForegroundChanged;
-        foreground.Changed += () => app.Dispatcher.BeginInvoke(Compose);
         void Bind(Settings s)
         {
             keys.Clear();
@@ -372,8 +387,6 @@ public static class Program
             keys.Bind(s.DiagnoseKey, () => engine.Diagnose(diagnosticsFolder));
             if (s.ExactKey.Length > 0)
                 keys.Bind(s.ExactKey, engine.Exact);
-            if (s.RuneChain && s.RuneResetKey.Length > 0)
-                keys.Bind(s.RuneResetKey, () => pipeline.Runes.Reset("key", FileLog.Write));
         }
         Bind(settings);
         // "Mit Windows starten": the entry follows the setting — now, where an entry naming
@@ -495,8 +508,6 @@ public static class Program
             engine.Apply(s);
             ApplyCapture(s);
             Bind(s);
-            showRunes = s.RuneChain;
-            Compose();
             Autostarted(s);
             if (s.CheckForUpdates && !updatesChecked)
                 CheckUpdates();
@@ -540,6 +551,12 @@ public static class Program
                 Status(Texts.Get("ItemImagesLoading", done, total));
         };
         model.Rumours.Changed += engine.RumoursChanged;
+        model.Runes.Changed += engine.RunesChanged;
+        model.Runes.ChainReset += () =>
+        {
+            FileLog.Write("Rune chain: reset in the window");
+            chain.Reset();
+        };
         // asked: "Refresh" in the window — then the outcome is told, so that "Loading
         // community data…" does not stay for good.
         void LoadRumours(bool asked) =>
@@ -635,7 +652,7 @@ public static class Program
         }
         CheckGameConfig();
         model.Settings.Saved += _ => CheckGameConfig();
-        model.Settings.Saved += s => tradeSettings = s;
+        model.Settings.Saved += s => savedSettings = s;
         engine.Draw += _ => app.Dispatcher.BeginInvoke(CheckGameConfig);
         if (gameConfig.Found)
             FileLog.Write($"Game settings: {gameConfig.File}, language {gameConfig.ClientLanguage}{(gameConfig.LanguageSupported ? "" : " (not read, English assumed)")}, UI Text Size {gameConfig.TextSize}, Popup Size {gameConfig.PopupSize.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}");
@@ -750,7 +767,27 @@ public static class Program
         // trade site, with the live price on (pictures for the guide).
         var context = new LookContext(RumourBook.LoadCached(), settings with { LiveTradePrice = true }, Console.WriteLine);
         using var trade = new TradeClient(() => book, Console.WriteLine) { InPerson = () => settings.TradeInPerson };
-        var windows = GameWindows.Standard(pipeline, trade);
+        // POE2PRICER_CHAIN: the rune chain for the picture (pictures for the guide), rune ids
+        // in the order chosen, "+" joins the runes of one link, "~" before a link makes it
+        // provisional, "|" ends an expedition (all explosives placed) and begins the next
+        // ("Opulent,~Time+Toxic,|,Bond"). POE2PRICER_CHAIN_HOVER: the tile of the last row the
+        // mouse is on (0-based), with that rune's caption under it.
+        var chain = new RuneChain();
+        foreach (var (link, i) in (Environment.GetEnvironmentVariable("POE2PRICER_CHAIN") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select((l, i) => (l, i)))
+        {
+            if (link == "|")
+            {
+                chain.Complete();
+                continue;
+            }
+            bool fixedLink = !link.StartsWith('~');
+            var runes = link.TrimStart('~').Split('+').Select(id => pipeline.Runes[id] ?? throw new ArgumentException($"unknown rune {id}")).ToArray();
+            if (fixedLink)
+                chain.Confirm($"guide-{i}", runes);
+            else
+                chain.Guess($"guide-{i}", runes);
+        }
+        var windows = GameWindows.Standard(pipeline, trade, chain);
         IOpenWindow? open = null;
         // As the overlay does: the first picture is looked at, each further one glanced at and
         // followed (the rumour panel shows its tiers only once a glance found it at rest).
@@ -790,12 +827,22 @@ public static class Program
                 picture = relabel.Next.LabelAsync(shot, Task.FromResult(book), context).GetAwaiter().GetResult();
         }
         Console.WriteLine(picture.Status);
-        var labels = picture.Labels;
+        // The marks (the remnant rows' class dots and ✗) with the prices, as the overlay draws them (Scene.All).
+        Label[] labels = picture.Marks is { Length: > 0 } marks ? [.. picture.Labels, .. marks] : picture.Labels;
         var rumours = picture.Rumours;
 
         var background = new BitmapImage(new Uri(Path.GetFullPath(input)));
         // Drawn onto the picture as it is: at the game's part of it, at the picture's scale.
         var layer = new LabelLayer { Labels = labels, Divine = divine, Exalted = exalted, Chaos = chaos, Rumours = rumours, PixelScale = shot.Scale, Origin = new System.Windows.Point(shot.ScreenBounds.X, shot.ScreenBounds.Y) };
+        // The rune chain's strip as the overlay draws it (OverlayEngine.Standing).
+        if (RuneStrip.Of(chain.Rows, n => Texts.Get("OverlayRuneChain", n)) is { } made)
+        {
+            var (strip, runes) = made;
+            int last = runes.Length - 1;
+            if (Environment.GetEnvironmentVariable("POE2PRICER_CHAIN_HOVER") is { Length: > 0 } hovered && int.Parse(hovered) is var hover && hover >= 0 && hover < runes[last].Length)
+                strip = strip with { Hover = (last, hover), Caption = $"{runes[last][hover].Name(gameLanguage)}  ·  {runes[last][hover].Effect(gameLanguage)}" };
+            layer.Strip = strip;
+        }
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {

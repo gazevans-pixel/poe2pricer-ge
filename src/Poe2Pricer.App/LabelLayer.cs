@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Poe2Pricer.Core;
 using Poe2Pricer.Core.Market;
+using Poe2Pricer.Core.Runes;
 
 namespace Poe2Pricer.App;
 
@@ -25,6 +26,9 @@ public sealed class LabelLayer : FrameworkElement
     // Rumour table beside the "Uncharted Waters" panel, like PoeAncientsPriceHelper shows it:
     // Rumour, Map, Mods, Rating; one row per rumour, level with its line in the panel.
     public (Box Panel, RumourLine[] Lines, IslandSummary? Island)? Rumours { get; set; }
+
+    // The rune chain at the top of the screen (Scene.Strip); null: none.
+    public RuneStrip? Strip { get; set; }
     public ImageSource? Divine { get; set; }
     public ImageSource? Exalted { get; set; }
     public ImageSource? Chaos { get; set; }
@@ -70,18 +74,20 @@ public sealed class LabelLayer : FrameworkElement
         dc.PushTransform(new ScaleTransform(PixelScale, PixelScale));
         if (Rumours is { } r)
             DrawRumours(dc, r.Panel, r.Lines, r.Island);
+        if (Strip is { } strip)
+            DrawStrip(dc, strip, RenderSize.Width / PixelScale);
         foreach (var l in Labels)
         {
             var b = l.Bounds;
             double cx = b.X + b.Width / 2.0;
-            if (l.Runes is { } runes)
+            if (l.Caption is { } caption)
             {
-                DrawRunes(dc, b, runes);
+                DrawCaption(dc, l, caption);
                 continue;
             }
-            if (l.Mark == RuneChain.Repeat)
+            if (l.Frame is { } frame)
             {
-                DrawRepeat(dc, b);
+                DrawFrame(dc, l, frame);
                 continue;
             }
             if (l.Row)
@@ -278,9 +284,12 @@ public sealed class LabelLayer : FrameworkElement
                 dc.DrawText(tag, new Point(px + 20 - tag.Width / 2, y + 11 - tag.Height / 2));
             }
             string shown = e is null ? "?" : e.Shown + (e.Own.Length > 0 ? "*" : "");
-            var pillBrush = e is null ? DimPill : dimmed ? DimPill : Poe2Pricer.Ui.RatingColours.Of(e.Shown);
+            // The pill keeps the rating's colour in a dimmed row too: it is the one place the
+            // rating sits, and grey hid an S+ among the rotated rumours (reported 31.10.2026);
+            // the faint title alone tells the row apart from the panel's lines.
+            var pillBrush = e is null ? DimPill : Poe2Pricer.Ui.RatingColours.Of(e.Shown);
             dc.DrawRoundedRectangle(pillBrush, null, new Rect(x + width - pad - pillWidth, y + 1, pillWidth, pillHeight), 11, 11);
-            var pill = T(shown, SemiBold, 13, dimmed || e is null ? DimPillInk : PillInk);
+            var pill = T(shown, SemiBold, 13, e is null ? DimPillInk : PillInk);
             dc.DrawText(pill, new Point(x + width - pad - pillWidth / 2 - pill.Width / 2, y + 1 + pillHeight / 2 - pill.Height / 2));
             if (e is null)
                 return;
@@ -307,12 +316,17 @@ public sealed class LabelLayer : FrameworkElement
         }
     }
 
-    // The runes carried along the map's chain (RuneChain): their pictures in a row on a dark
-    // plate, each framed in the crown's gold.
-    private static readonly Pen RuneFrame = FrozenPen(Color.FromRgb(230, 180, 60), 2);
-    private static readonly Pen RepeatFrame = FrozenPen(Color.FromRgb(230, 40, 40), 3);
-    private static readonly Pen FreshFrame = FrozenPen(Color.FromRgb(255, 255, 255), 3);
-    private static readonly Brush RepeatBadge = Frozen(new SolidColorBrush(Color.FromRgb(200, 30, 30)));
+    // The crowned rune of a remnant row: a small black square on the tile's bottom edge with a
+    // dot in the colour of the rune's class (Label.Frame) — loot in the program's gold, danger
+    // red, weaker green, neutral white. The square is the size of the orb beside a price
+    // (OrbSize; half of it was too small in the game, 02.11.2026 evening). 01.11.2026: a
+    // bar, not a frame; 02.11.: a dot, not a bar — a bar under
+    // every crowned rune was too much on a list where the price decides. The class colours also
+    // frame the tiles of the rune chain (FramePens, CaptionPens).
+    private static readonly Brush DotPlate = Frozen(new SolidColorBrush(Color.FromArgb(235, 0, 0, 0)));
+    private static readonly Dictionary<string, Brush> DotBrushes = new[] { "loot", "danger", "weaker", "neutral" }.ToDictionary(k => k, k => Frozen(new SolidColorBrush(Poe2Pricer.Ui.RuneColours.Of(k))));
+    private static readonly Dictionary<string, Pen> FramePens = new[] { "loot", "danger", "weaker", "neutral" }.ToDictionary(k => k, k => FrozenPen(Poe2Pricer.Ui.RuneColours.Of(k), 5));
+    private static readonly Dictionary<string, Pen> CaptionPens = new[] { "loot", "danger", "weaker", "neutral" }.ToDictionary(k => k, k => FrozenPen(Poe2Pricer.Ui.RuneColours.Of(k), 2));
 
     private static Pen FrozenPen(Color colour, double width)
     {
@@ -321,43 +335,120 @@ public sealed class LabelLayer : FrameworkElement
         return pen;
     }
 
-    // Every rune known, laid out as RuneChain.Layout says (gold and purple first and larger):
-    // the carried ones in colour with a gold frame, the others grey and faint.
-    private static void DrawRunes(DrawingContext dc, Box b, RuneTile[] runes)
+    // The class mark: the square centred on the tile's bottom edge, the dot in its middle; with
+    // Mark "x" or "o" the badge at the tile's bottom right corner: the chain carries this rune
+    // already (a red disc with a white cross; "o": hollow, red ring and red cross, while that is
+    // only provisional). Square and badge do not touch (the tile is 50 wide, the badge 20).
+    private static void DrawFrame(DrawingContext dc, Label l, string frame)
     {
-        dc.DrawRoundedRectangle(Plate, null, new Rect(b.X, b.Y, b.Width, b.Height), 6, 6);
-        var (cells, _, _) = RuneChain.Layout(runes);
-        for (int i = 0; i < runes.Length; i++)
+        var b = l.Bounds;
+        double s = OrbSize,
+            cx = b.X + b.Width / 2.0;
+        dc.DrawRoundedRectangle(DotPlate, null, new Rect(cx - s / 2, b.Bottom - s / 2, s, s), 3, 3);
+        dc.DrawEllipse(DotBrushes.GetValueOrDefault(frame, DotBrushes["neutral"]), null, new Point(cx, b.Bottom), s / 4, s / 4);
+        if (l.Mark is not ("x" or "o"))
+            return;
+        bool hollow = l.Mark == "o";
+        var centre = new Point(b.Right - 2, b.Bottom - 2);
+        dc.DrawEllipse(hollow ? Card : Badge, hollow ? BadgeRing : BadgeSeam, centre, 10, 10);
+        var cross = hollow ? BadgeCrossRed : BadgeCrossWhite;
+        dc.DrawLine(cross, new Point(centre.X - 4.5, centre.Y - 4.5), new Point(centre.X + 4.5, centre.Y + 4.5));
+        dc.DrawLine(cross, new Point(centre.X + 4.5, centre.Y - 4.5), new Point(centre.X - 4.5, centre.Y + 4.5));
+    }
+
+    private static readonly Brush Badge = Frozen(new SolidColorBrush(Color.FromRgb(205, 50, 50)));
+    private static readonly Pen BadgeSeam = FrozenPen(Color.FromArgb(230, 0, 0, 0), 2);
+    private static readonly Pen BadgeRing = FrozenPen(Color.FromRgb(225, 70, 70), 2.5);
+    private static readonly Pen BadgeCrossWhite = FrozenPen(Colors.White, 3);
+    private static readonly Pen BadgeCrossRed = FrozenPen(Color.FromRgb(225, 70, 70), 3);
+
+    // The rune chain: a plate at the top of the screen, the tiles centred (RuneStrip lays them
+    // out, in the reference picture's pixels; width: its width). The title above the tiles, one
+    // tile per rune — its picture from the bar on a dark ground, framed in its class colour,
+    // thin while provisional — and under the tile the mouse is on that rune's name and effect.
+    private static void DrawStrip(DrawingContext dc, RuneStrip strip, double width)
+    {
+        var titles = strip.Rows.Select(r => Format(r.Title, 14, Faint)).ToArray();
+        var check = Format("✓", 15, Check);
+        double left = double.MaxValue, right = double.MinValue;
+        for (int r = 0; r < strip.Rows.Length; r++)
         {
-            var at = new Rect(b.X + cells[i].X, b.Y + cells[i].Y, cells[i].Width, cells[i].Height);
-            var t = runes[i].Thumb;
-            BitmapSource picture = BitmapSource.Create(t.Size, t.Size, 96, 96, PixelFormats.Bgr24, null, t.Bgr, t.Size * 3);
-            if (runes[i].Carried)
+            double l = strip.TilesLeft(r, width);
+            left = Math.Min(left, l);
+            right = Math.Max(right, Math.Max(l + strip.TilesWidth(r), l + titles[r].Width + (strip.Rows[r].Complete ? CheckGap + check.Width : 0)));
+        }
+        var plate = new Rect(left - RuneStrip.Pad, RuneStrip.Top, right - left + 2 * RuneStrip.Pad, strip.Bottom - RuneStrip.Top);
+        dc.DrawRoundedRectangle(Card, StripEdge, plate, 8, 8);
+        for (int r = 0; r < strip.Rows.Length; r++)
+        {
+            var row = strip.Rows[r];
+            // A complete expedition (all explosives placed): faint, a green check after the title.
+            if (row.Complete)
+                dc.PushOpacity(SpentOpacity);
+            double rowLeft = strip.TilesLeft(r, width), top = RuneStrip.RowTop(r);
+            dc.DrawText(titles[r], new Point(rowLeft, top - 2));
+            if (row.Complete)
+                dc.DrawText(check, new Point(rowLeft + titles[r].Width + CheckGap, top - 3));
+            for (int i = 0; i < row.Entries.Length; i++)
             {
-                picture.Freeze();
-                dc.DrawImage(picture, at);
-                dc.DrawRoundedRectangle(null, runes[i].Fresh ? FreshFrame : RuneFrame, at, 4, 4);
+                var e = row.Entries[i];
+                var t = strip.TileBox(r, i, width);
+                var box = new Rect(t.X, t.Y, t.Width, t.Height);
+                dc.DrawRoundedRectangle(StripGround, null, box, 4, 4);
+                if (RuneIcon(e.Rune) is { } icon)
+                    dc.DrawImage(icon, new Rect(t.X + 2, t.Y + 2, t.Width - 4, t.Height - 4));
+                var pen = e.Fixed ? FramePens.GetValueOrDefault(e.Class, FramePens["neutral"]) : CaptionPens.GetValueOrDefault(e.Class, CaptionPens["neutral"]);
+                dc.DrawRoundedRectangle(null, pen, box, 4, 4);
             }
-            else
-            {
-                var grey = new FormatConvertedBitmap(picture, PixelFormats.Gray8, null, 0);
-                grey.Freeze();
-                dc.PushOpacity(.4);
-                dc.DrawImage(grey, at);
+            if (row.Complete)
                 dc.Pop();
-            }
+        }
+        if (strip.Hover is { } h && strip.Caption is { } caption)
+        {
+            var t = strip.TileBox(h.Row, h.Index, width);
+            var text = Format(caption, 17, Ink);
+            double pad = 10,
+                w = text.Width + 2 * pad,
+                x = Math.Max(0, Math.Min(width - w, t.X + t.Width / 2.0 - w / 2));
+            var rect = new Rect(x, plate.Bottom + 4, w, 34);
+            dc.DrawRoundedRectangle(Card, CaptionPens.GetValueOrDefault(strip.Rows[h.Row].Entries[h.Index].Class, CaptionPens["neutral"]), rect, 6, 6);
+            dc.DrawText(text, new Point(x + pad, rect.Y + (rect.Height - text.Height) / 2));
         }
     }
 
-    // A crowned rune in the remnant list that the chain carries already: choosing that row
-    // carries nothing new. A red frame round the tile and a red badge on its corner.
-    private static void DrawRepeat(DrawingContext dc, Box b)
+    private const double SpentOpacity = .45;
+    private const double CheckGap = 6;
+    private static readonly Brush Check = Frozen(new SolidColorBrush(Color.FromRgb(90, 210, 120)));
+    private static readonly Pen StripEdge = FrozenPen(Color.FromArgb(200, 90, 90, 100), 1);
+    private static readonly Brush StripGround = Frozen(new SolidColorBrush(Color.FromRgb(34, 34, 40)));
+    private static readonly Dictionary<string, ImageSource?> RuneIcons = [];
+
+    // The rune's picture as the bar in the world shows it (data/runes/remnant), loaded once.
+    private static ImageSource? RuneIcon(string rune)
     {
-        dc.DrawRoundedRectangle(null, RepeatFrame, new Rect(b.X, b.Y, b.Width, b.Height), 4, 4);
-        double r = 11;
-        var centre = new Point(b.Right - 2, b.Y + 2);
-        dc.DrawEllipse(RepeatBadge, null, centre, r, r);
-        Text(dc, RuneChain.Repeat, 15, Brushes.White, centre.X, centre.Y);
+        lock (RuneIcons)
+        {
+            if (!RuneIcons.TryGetValue(rune, out var icon))
+                RuneIcons[rune] = icon = LoadImage(Path.Combine(AppContext.BaseDirectory, "data", "runes", "remnant", rune + ".png"));
+            return icon;
+        }
+    }
+
+    // The caption above the list: the rune's name and effect on a dark plate, framed in the
+    // class colour. The plate's left edge and height are the label's; the width follows the text,
+    // at most the label's width when it has one (the remnant list's: a longer text ends in "…",
+    // the game's own tooltip has it whole; 02.11.2026).
+    private static void DrawCaption(DrawingContext dc, Label l, string caption)
+    {
+        var b = l.Bounds;
+        double pad = 10;
+        var text = new FormattedText(caption, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Face, 17, Ink, 1) { MaxLineCount = 1, Trimming = TextTrimming.CharacterEllipsis };
+        if (b.Width > 2 * pad)
+            text.MaxTextWidth = b.Width - 2 * pad;
+        double width = text.Width + 2 * pad;
+        var rect = new Rect(b.X, b.Y, width, b.Height);
+        dc.DrawRoundedRectangle(Card, CaptionPens.GetValueOrDefault(l.Frame ?? "neutral", CaptionPens["neutral"]), rect, 6, 6);
+        dc.DrawText(text, new Point(b.X + pad, b.Y + (b.Height - text.Height) / 2));
     }
 
     private static FormattedText Format(string s, double size, Brush brush) =>
